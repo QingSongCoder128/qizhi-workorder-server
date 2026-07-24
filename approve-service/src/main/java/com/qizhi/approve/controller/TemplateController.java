@@ -40,10 +40,14 @@ public class TemplateController {
     @Operation(summary = "模板分页列表")
     @GetMapping("/list")
     public R<PageResult<ApprovalTemplate>> list(
-            @RequestParam(defaultValue = "1") Integer current,
-            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) Integer current,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer pageSize,
             @RequestParam(required = false) String keyword) {
-        return R.ok(templateService.getTemplatePage(current, size, keyword));
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        return R.ok(templateService.getTemplatePage(c, s, keyword));
     }
 
     /**

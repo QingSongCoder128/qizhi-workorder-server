@@ -38,13 +38,17 @@ public class MessageController {
     @Operation(summary = "我的消息列表")
     @GetMapping("/list")
     public R<PageResult<SysMessage>> list(@RequestHeader("X-User-Id") Long userId,
-                                          @RequestParam(defaultValue = "1") Integer current,
-                                          @RequestParam(defaultValue = "10") Integer size) {
-        Page<SysMessage> page = new Page<>(current, size);
+                                          @RequestParam(required = false) Integer current,
+                                          @RequestParam(required = false) Integer size,
+                                          @RequestParam(required = false) Integer page,
+                                          @RequestParam(required = false) Integer pageSize) {
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        Page<SysMessage> pg = new Page<>(c, s);
         LambdaQueryWrapper<SysMessage> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysMessage::getReceiverId, userId)
                 .orderByDesc(SysMessage::getCreatedAt);
-        Page<SysMessage> result = messageMapper.selectPage(page, wrapper);
+        Page<SysMessage> result = messageMapper.selectPage(pg, wrapper);
         return R.ok(PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), result.getRecords()));
     }
 
@@ -90,10 +94,14 @@ public class MessageController {
 
     @Operation(summary = "死信列表")
     @GetMapping("/dlq/list")
-    public R<PageResult<DeadLetter>> dlqList(@RequestParam(defaultValue = "1") Integer current,
-                                             @RequestParam(defaultValue = "10") Integer size) {
-        Page<DeadLetter> page = new Page<>(current, size);
-        Page<DeadLetter> result = deadLetterMapper.selectPage(page,
+    public R<PageResult<DeadLetter>> dlqList(@RequestParam(required = false) Integer current,
+                                             @RequestParam(required = false) Integer size,
+                                             @RequestParam(required = false) Integer page,
+                                             @RequestParam(required = false) Integer pageSize) {
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        Page<DeadLetter> pg = new Page<>(c, s);
+        Page<DeadLetter> result = deadLetterMapper.selectPage(pg,
                 new LambdaQueryWrapper<DeadLetter>().orderByDesc(DeadLetter::getCreatedAt));
         return R.ok(PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), result.getRecords()));
     }
@@ -101,6 +109,42 @@ public class MessageController {
     @Operation(summary = "死信手动重试")
     @PostMapping("/dlq/retry/{id}")
     public R<Void> dlqRetry(@PathVariable Long id) {
+        return doRetryDeadLetter(id);
+    }
+
+    // ==================== 前端适配端点 ====================
+
+    /**
+     * 标记已读（前端 RESTful 风格 /{id}/read）
+     */
+    @Operation(summary = "标记已读（前端适配）")
+    @PutMapping("/{id}/read")
+    public R<Void> markReadAlias(@PathVariable Long id) {
+        return markRead(id);
+    }
+
+    /**
+     * 死信列表（前端路径 /dead-letter/list）
+     */
+    @Operation(summary = "死信列表（前端适配）")
+    @GetMapping("/dead-letter/list")
+    public R<PageResult<DeadLetter>> deadLetterList(@RequestParam(required = false) Integer current,
+                                                      @RequestParam(required = false) Integer size,
+                                                      @RequestParam(required = false) Integer page,
+                                                      @RequestParam(required = false) Integer pageSize) {
+        return dlqList(current, size, page, pageSize);
+    }
+
+    /**
+     * 死信手动重试（前端路径 /dead-letter/{id}/retry）
+     */
+    @Operation(summary = "死信重试（前端适配）")
+    @PostMapping("/dead-letter/{id}/retry")
+    public R<Void> deadLetterRetry(@PathVariable Long id) {
+        return doRetryDeadLetter(id);
+    }
+
+    private R<Void> doRetryDeadLetter(Long id) {
         DeadLetter dl = deadLetterMapper.selectById(id);
         if (dl == null) {
             return R.fail("死信记录不存在");

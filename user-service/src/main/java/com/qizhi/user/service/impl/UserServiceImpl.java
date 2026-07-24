@@ -275,6 +275,16 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public void setStatus(Long userId, String status) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        user.setStatus(status);
+        userMapper.updateById(user);
+    }
+
+    @Override
     public void updateProfile(Long userId, ProfileUpdateDTO dto) {
         SysUser user = userMapper.selectById(userId);
         if (user == null) {
@@ -314,6 +324,54 @@ public class UserServiceImpl implements UserService {
         Long roleId = userRoles.get(0).getRoleId();
         SysRole role = roleMapper.selectById(roleId);
         return role != null ? role.getRoleCode() : "EMPLOYEE";
+    }
+
+    /**
+     * 管理员编辑用户（修改 realName/phone/email/deptCode/角色）
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateUser(Long id, Map<String, Object> body) {
+        SysUser user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (body.get("realName") != null) {
+            user.setRealName(String.valueOf(body.get("realName")));
+        }
+        if (body.get("phone") != null) {
+            user.setPhone(String.valueOf(body.get("phone")));
+        }
+        if (body.get("email") != null) {
+            user.setEmail(String.valueOf(body.get("email")));
+        }
+        if (body.get("deptCode") != null) {
+            user.setDeptCode(String.valueOf(body.get("deptCode")));
+        }
+        userMapper.updateById(user);
+
+        // 更新角色（如果传入了 roleCodes）
+        if (body.containsKey("roleCodes")) {
+            Object codes = body.get("roleCodes");
+            if (codes instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> roleCodes = (List<String>) codes;
+                // 删除旧角色
+                userRoleMapper.delete(
+                        new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, id));
+                // 分配新角色
+                for (String roleCode : roleCodes) {
+                    SysRole role = roleMapper.selectOne(
+                            new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, roleCode));
+                    if (role != null) {
+                        SysUserRole ur = new SysUserRole();
+                        ur.setUserId(id);
+                        ur.setRoleId(role.getId());
+                        userRoleMapper.insert(ur);
+                    }
+                }
+            }
+        }
     }
 
     private UserVO toUserVO(SysUser user) {

@@ -47,10 +47,14 @@ public class RoleController {
      */
     @Operation(summary = "角色分页查询")
     @GetMapping("/page")
-    public R<PageResult<SysRole>> page(@RequestParam(defaultValue = "1") Integer current,
-                                        @RequestParam(defaultValue = "10") Integer size,
+    public R<PageResult<SysRole>> page(@RequestParam(required = false) Integer current,
+                                        @RequestParam(required = false) Integer size,
+                                        @RequestParam(required = false) Integer page,
+                                        @RequestParam(required = false) Integer pageSize,
                                         @RequestParam(required = false) String keyword) {
-        return R.ok(roleService.getRolePage(current, size, keyword));
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        return R.ok(roleService.getRolePage(c, s, keyword));
     }
 
     /**

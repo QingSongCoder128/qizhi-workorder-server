@@ -9,6 +9,7 @@ import com.qizhi.approve.entity.ApprovalNode;
 import com.qizhi.approve.entity.ApprovalRecord;
 import com.qizhi.approve.entity.ApprovalTemplate;
 import com.qizhi.approve.feign.MessageFeignClient;
+import com.qizhi.approve.feign.WorkOrderFeignClient;
 import com.qizhi.approve.mapper.ApprovalInstanceMapper;
 import com.qizhi.approve.mapper.ApprovalRecordMapper;
 import com.qizhi.approve.service.ApproveService;
@@ -46,6 +47,7 @@ public class ApproveServiceImpl implements ApproveService {
     private final ApprovalInstanceMapper instanceMapper;
     private final ApprovalRecordMapper recordMapper;
     private final MessageFeignClient messageFeignClient;
+    private final WorkOrderFeignClient workOrderFeignClient;
     private final TemplateService templateService;
 
     /** 紧急工单超时阈值（小时），从 Nacos 读取，支持热更新 */
@@ -78,6 +80,8 @@ public class ApproveServiceImpl implements ApproveService {
         instance.setOrderNo(dto.getOrderNo());
         instance.setTitle(dto.getTitle());
         instance.setSubmitterId(dto.getSubmitterId());
+        instance.setSubmitterName(dto.getSubmitterName());
+        instance.setDetail(dto.getDetail());
         instance.setDepartmentCode(dto.getDepartmentCode());
         instance.setPriority(dto.getPriority());
         instance.setStatus("PENDING");
@@ -204,6 +208,45 @@ public class ApproveServiceImpl implements ApproveService {
     }
 
     /**
+     * 审批详情（前端适配）
+     * 返回 {workOrder: {...}, nodes: [...]}
+     */
+    @Override
+    public Map<String, Object> getDetail(Long approvalInstanceId) {
+        ApprovalInstance instance = instanceMapper.selectById(approvalInstanceId);
+        if (instance == null) {
+            throw new BusinessException("审批单不存在");
+        }
+
+        // 构造 workOrder 信息（前端期望的字段）
+        Map<String, Object> workOrder = new HashMap<>();
+        workOrder.put("id", instance.getWorkOrderId());
+        workOrder.put("orderNo", instance.getOrderNo());
+        workOrder.put("title", instance.getTitle());
+        workOrder.put("submitterId", instance.getSubmitterId());
+        workOrder.put("submitterName", instance.getSubmitterName());
+        workOrder.put("detail", instance.getDetail());
+        workOrder.put("priority", instance.getPriority());
+        workOrder.put("departmentCode", instance.getDepartmentCode());
+        workOrder.put("approvalInstanceId", instance.getId());
+        workOrder.put("status", instance.getStatus());
+        workOrder.put("currentNode", instance.getCurrentNode());
+        workOrder.put("currentOrder", instance.getCurrentOrder());
+        workOrder.put("totalNodes", instance.getTotalNodes());
+
+        // 获取审批节点列表
+        List<ApprovalRecord> nodes = recordMapper.selectList(
+                new LambdaQueryWrapper<ApprovalRecord>()
+                        .eq(ApprovalRecord::getApprovalId, approvalInstanceId)
+                        .orderByAsc(ApprovalRecord::getNodeOrder));
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("workOrder", workOrder);
+        result.put("nodes", nodes);
+        return result;
+    }
+
+    /**
      * 处理超时审批单（定时任务调用）
      * 查找超过 48 小时仍未处理的审批单，发送督办通知
      */
@@ -255,6 +298,8 @@ public class ApproveServiceImpl implements ApproveService {
             instance.setStatus("APPROVED");
             instanceMapper.updateById(instance);
             log.info("审批全部通过: approvalId={}, orderNo={}", instance.getId(), instance.getOrderNo());
+            // 回调 work-order-service 更新工单状态为 COMPLETED
+            updateWorkOrderStatus(instance.getWorkOrderId(), "COMPLETED", "审批全部通过，工单完结");
             sendNotification(instance.getSubmitterId(), "审批结果通知",
                     "您的工单[" + instance.getOrderNo() + "]已通过全部审批",
                     "APPROVE_NOTIFY", instance.getWorkOrderId());
@@ -290,6 +335,8 @@ public class ApproveServiceImpl implements ApproveService {
         instanceMapper.updateById(instance);
 
         log.info("审批已驳回: approvalId={}, opinion={}", instance.getId(), dto.getOpinion());
+        // 回调 work-order-service 更新工单状态为 REJECTED
+        updateWorkOrderStatus(instance.getWorkOrderId(), "REJECTED", "审批驳回: " + dto.getOpinion());
         sendNotification(instance.getSubmitterId(), "审批结果通知",
                 "您的工单[" + instance.getOrderNo() + "]已被驳回，原因：" + dto.getOpinion(),
                 "REJECT_NOTIFY", instance.getWorkOrderId());
@@ -463,6 +510,20 @@ public class ApproveServiceImpl implements ApproveService {
     /**
      * 发送通知（封装 Feign 调用，失败不抛异常）
      */
+    /**
+     * 回调 work-order-service 更新工单状态（审批通过/驳回后）
+     */
+    private void updateWorkOrderStatus(Long workOrderId, String status, String remark) {
+        try {
+            Map<String, String> body = new HashMap<>();
+            body.put("status", status);
+            body.put("remark", remark);
+            workOrderFeignClient.updateStatus(workOrderId, body);
+        } catch (Exception e) {
+            log.error("回调更新工单状态失败: workOrderId={}, status={}, error={}", workOrderId, status, e.getMessage());
+        }
+    }
+
     private void sendNotification(Long receiverId, String title, String content,
                                    String msgType, Long bizId) {
         try {

@@ -37,4 +37,8 @@ public interface WorkOrderFeignClient {
             @RequestParam(value = "type", required = false) String type,
             @RequestParam(value = "startDate", required = false) String startDate,
             @RequestParam(value = "endDate", required = false) String endDate);
+
+    /** 实时统计看板数据 */
+    @GetMapping("/stats")
+    R<Map<String, Object>> getStats();
 }

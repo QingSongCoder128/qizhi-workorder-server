@@ -20,6 +20,10 @@ public class ApprovalInstance {
 
     private Long submitterId;
 
+    private String submitterName;
+
+    private String detail;
+
     private Long templateId;
 
     private Long approverId;

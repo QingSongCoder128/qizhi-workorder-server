@@ -24,6 +24,9 @@ public interface WorkOrderService {
 
     PageResult<WorkOrder> getMyList(Long userId, Integer current, Integer size, String status);
 
+    /** 管理员全量工单列表（支持状态/类型/关键词筛选） */
+    PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String keyword);
+
     WorkOrderDetailVO getDetail(Long id);
 
     void resubmit(Long id, WorkOrderSubmitDTO dto, Long userId, String username);
@@ -33,6 +36,18 @@ public interface WorkOrderService {
 
     /** 工单导出列表（支持部门、类型、时间范围筛选） */
     List<Map<String, Object>> getExportList(String deptCode, String type, String startDate, String endDate);
+
+    /** 实时统计看板数据（供 statistics-service Feign 调用） */
+    Map<String, Object> getStats();
+
+    /** 撤销工单（仅待审批状态可撤销） */
+    void revoke(Long id, Long userId);
+
+    /** 更新工单状态（供 approve-service 回调） */
+    void updateStatus(Long id, String status, String remark);
+
+    /** 附件上传，返回文件访问 URL */
+    Map<String, String> uploadAttachment(org.springframework.web.multipart.MultipartFile file);
 
     String generateOrderNo();
 }

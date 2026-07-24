@@ -39,11 +39,11 @@ public class WorkOrderDetailVO {
     private LocalDateTime createdAt;
     private LocalDateTime completedAt;
 
-    // 审批时间线
-    private List<ApprovalTimeline> timeline;
+    // 审批时间线（前端字段名 approvalNodes）
+    private List<ApprovalTimeline> approvalNodes;
 
-    // 状态历史
-    private List<StatusHistory> history;
+    // 状态历史（前端字段名 statusHistory）
+    private List<StatusHistory> statusHistory;
 
     @Data
     @Builder

@@ -7,6 +7,7 @@ import com.qizhi.approve.entity.ApprovalRecord;
 import com.qizhi.common.core.result.PageResult;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 审批管理服务接口
@@ -46,6 +47,12 @@ public interface ApproveService {
 
     /** 获取审批单的全部审批记录（节点列表） */
     List<ApprovalRecord> getRecords(Long approvalId);
+
+    /**
+     * 审批详情（前端适配）
+     * 返回 {workOrder: {orderNo, title, ...}, nodes: [ApprovalRecord...] }
+     */
+    Map<String, Object> getDetail(Long approvalInstanceId);
 
     /**
      * 处理超时审批单（定时任务调用）

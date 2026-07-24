@@ -21,6 +21,9 @@ public class ApprovalCreateDTO {
     /** 工单标题 */
     private String title;
 
+    /** 工单详情 */
+    private String detail;
+
     /** 提交人 ID */
     private Long submitterId;
 

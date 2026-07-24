@@ -233,6 +233,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         approveRequest.put("title", order.getTitle());
         approveRequest.put("submitterId", userId);
         approveRequest.put("submitterName", username);
+        approveRequest.put("detail", order.getDetail());
         approveRequest.put("departmentCode", order.getDepartmentCode());
         approveRequest.put("workType", order.getType()); // 工单类型，用于匹配审批模板
         approveRequest.put("priority", order.getPriority());
@@ -273,6 +274,26 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         wrapper.eq(WorkOrder::getSubmitterId, userId);
         if (StringUtils.hasText(status)) {
             wrapper.eq(WorkOrder::getStatus, status);
+        }
+        wrapper.orderByDesc(WorkOrder::getCreatedAt);
+        Page<WorkOrder> result = workOrderMapper.selectPage(page, wrapper);
+        return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), result.getRecords());
+    }
+
+    @Override
+    public PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String keyword) {
+        Page<WorkOrder> page = new Page<>(current, size);
+        LambdaQueryWrapper<WorkOrder> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(status)) {
+            wrapper.eq(WorkOrder::getStatus, status);
+        }
+        if (StringUtils.hasText(type)) {
+            wrapper.eq(WorkOrder::getType, type);
+        }
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(WorkOrder::getTitle, keyword)
+                    .or().like(WorkOrder::getOrderNo, keyword)
+                    .or().like(WorkOrder::getSubmitterName, keyword));
         }
         wrapper.orderByDesc(WorkOrder::getCreatedAt);
         Page<WorkOrder> result = workOrderMapper.selectPage(page, wrapper);
@@ -324,7 +345,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .versionNo(order.getVersionNo())
                 .createdAt(order.getCreatedAt())
                 .completedAt(order.getCompletedAt())
-                .history(historyList)
+                .statusHistory(historyList)
                 .build();
     }
 
@@ -406,6 +427,139 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         log.info("工单导出查询: deptCode={}, type={}, count={}", deptCode, type, result.size());
         return result;
+    }
+
+    /**
+     * 实时统计看板数据（供 statistics-service Feign 调用）
+     * 直接从 work_order 表聚合，返回前端期望的格式
+     */
+    @Override
+    public Map<String, Object> getStats() {
+        List<WorkOrder> allOrders = workOrderMapper.selectList(new LambdaQueryWrapper<>());
+
+        int totalCount = allOrders.size();
+        int pendingCount = (int) allOrders.stream()
+                .filter(o -> "PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
+                .count();
+        int completedCount = (int) allOrders.stream()
+                .filter(o -> "COMPLETED".equals(o.getStatus()))
+                .count();
+        // 超时工单：状态为待审批/审批中 且创建超过4小时
+        LocalDateTime timeoutThreshold = LocalDateTime.now().minusHours(4);
+        int timeoutCount = (int) allOrders.stream()
+                .filter(o -> ("PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
+                        && o.getCreatedAt() != null && o.getCreatedAt().isBefore(timeoutThreshold))
+                .count();
+
+        // 各部门工单分布
+        Map<String, String> deptNames = Map.of(
+                "DEPT_IT", "运维部", "DEPT_ADMIN", "行政部",
+                "DEPT_HR", "人事部", "DEPT_TECH", "技术部");
+        Map<String, Long> deptCounts = allOrders.stream()
+                .filter(o -> o.getDepartmentCode() != null)
+                .collect(Collectors.groupingBy(WorkOrder::getDepartmentCode, Collectors.counting()));
+        List<Map<String, Object>> deptDistribution = new ArrayList<>();
+        deptCounts.forEach((code, cnt) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("name", deptNames.getOrDefault(code, code));
+            item.put("value", cnt);
+            deptDistribution.add(item);
+        });
+
+        // 近7日工单趋势
+        DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("MM-dd");
+        List<Map<String, Object>> trend = new ArrayList<>();
+        for (int i = 6; i >= 0; i--) {
+            LocalDate date = LocalDate.now().minusDays(i);
+            LocalDateTime dayStart = date.atStartOfDay();
+            LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
+            long cnt = allOrders.stream()
+                    .filter(o -> o.getCreatedAt() != null
+                            && !o.getCreatedAt().isBefore(dayStart)
+                            && o.getCreatedAt().isBefore(dayEnd))
+                    .count();
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("date", date.format(dateFmt));
+            item.put("count", cnt);
+            trend.add(item);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalCount", totalCount);
+        result.put("pendingCount", pendingCount);
+        result.put("completedCount", completedCount);
+        result.put("timeoutCount", timeoutCount);
+        result.put("deptDistribution", deptDistribution);
+        result.put("trend", trend);
+        return result;
+    }
+
+    /**
+     * 撤销工单（仅待审批状态可撤销）
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void revoke(Long id, Long userId) {
+        WorkOrder order = workOrderMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException("工单不存在");
+        }
+        if (!order.getSubmitterId().equals(userId)) {
+            throw new BusinessException("只能撤销自己的工单");
+        }
+        if (!"PENDING_APPROVE".equals(order.getStatus())) {
+            throw new BusinessException("只有待审批状态的工单才能撤销");
+        }
+        order.setStatus("CANCELLED");
+        workOrderMapper.updateById(order);
+        saveHistory(id, "PENDING_APPROVE", "CANCELLED", userId, order.getSubmitterName(), "用户撤销工单");
+    }
+
+    /**
+     * 更新工单状态（供 approve-service 审批完成/驳回后回调）
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateStatus(Long id, String status, String remark) {
+        WorkOrder order = workOrderMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException("工单不存在");
+        }
+        String fromStatus = order.getStatus();
+        order.setStatus(status);
+        if ("COMPLETED".equals(status)) {
+            order.setCompletedAt(LocalDateTime.now());
+        }
+        workOrderMapper.updateById(order);
+        saveHistory(id, fromStatus, status, null, "system", remark != null ? remark : "审批状态变更");
+    }
+
+    /**
+     * 附件上传（存本地 uploads 目录，返回可访问 URL）
+     */
+    @Override
+    public Map<String, String> uploadAttachment(org.springframework.web.multipart.MultipartFile file) {
+        try {
+            String uploadDir = System.getProperty("user.dir") + "/uploads";
+            java.io.File dir = new java.io.File(uploadDir);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            String originalName = file.getOriginalFilename();
+            String ext = (originalName != null && originalName.contains("."))
+                    ? originalName.substring(originalName.lastIndexOf(".")) : "";
+            String fileName = java.util.UUID.randomUUID().toString().replace("-", "") + ext;
+            java.io.File dest = new java.io.File(dir, fileName);
+            file.transferTo(dest);
+
+            Map<String, String> result = new LinkedHashMap<>();
+            result.put("url", "/uploads/" + fileName);
+            result.put("fileName", originalName);
+            return result;
+        } catch (Exception e) {
+            log.error("附件上传失败: {}", e.getMessage(), e);
+            throw new BusinessException("附件上传失败");
+        }
     }
 
     @Override

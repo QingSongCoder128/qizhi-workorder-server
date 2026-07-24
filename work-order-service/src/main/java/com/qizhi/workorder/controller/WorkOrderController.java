@@ -35,10 +35,14 @@ public class WorkOrderController {
     @Operation(summary = "我的工单列表")
     @GetMapping("/my-list")
     public R<PageResult<WorkOrder>> myList(@RequestHeader("X-User-Id") Long userId,
-                                           @RequestParam(defaultValue = "1") Integer current,
-                                           @RequestParam(defaultValue = "10") Integer size,
+                                           @RequestParam(required = false) Integer current,
+                                           @RequestParam(required = false) Integer size,
+                                           @RequestParam(required = false) Integer page,
+                                           @RequestParam(required = false) Integer pageSize,
                                            @RequestParam(required = false) String status) {
-        return R.ok(workOrderService.getMyList(userId, current, size, status));
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        return R.ok(workOrderService.getMyList(userId, c, s, status));
     }
 
     @Operation(summary = "工单详情")
@@ -53,6 +57,37 @@ public class WorkOrderController {
                             @Valid @RequestBody WorkOrderSubmitDTO dto,
                             @RequestHeader("X-User-Id") Long userId,
                             @RequestHeader("X-Username") String username) {
+        workOrderService.resubmit(id, dto, userId, username);
+        return R.ok();
+    }
+
+    /**
+     * 管理员全量工单分页列表（前端 AllListView.vue 调用）
+     * 支持关键词、状态、类型筛选
+     */
+    @Operation(summary = "管理员工单列表")
+    @GetMapping("/list")
+    public R<PageResult<WorkOrder>> adminList(@RequestParam(required = false) Integer current,
+                                               @RequestParam(required = false) Integer size,
+                                               @RequestParam(required = false) Integer page,
+                                               @RequestParam(required = false) Integer pageSize,
+                                               @RequestParam(required = false) String status,
+                                               @RequestParam(required = false) String type,
+                                               @RequestParam(required = false) String keyword) {
+        int c = (current != null) ? current : (page != null ? page : 1);
+        int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
+        return R.ok(workOrderService.getAdminList(c, s, status, type, keyword));
+    }
+
+    /**
+     * 重新提交（前端 RESTful 风格 PUT）
+     */
+    @Operation(summary = "重新提交（PUT 别名）")
+    @PutMapping("/{id}/resubmit")
+    public R<Void> resubmitPut(@PathVariable Long id,
+                               @Valid @RequestBody WorkOrderSubmitDTO dto,
+                               @RequestHeader("X-User-Id") Long userId,
+                               @RequestHeader("X-Username") String username) {
         workOrderService.resubmit(id, dto, userId, username);
         return R.ok();
     }
@@ -91,5 +126,43 @@ public class WorkOrderController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
         return R.ok(workOrderService.getExportList(deptCode, type, startDate, endDate));
+    }
+
+    /**
+     * 实时统计看板数据（供 statistics-service Feign 调用）
+     */
+    @Operation(summary = "工单统计数据（供 Feign 调用）")
+    @GetMapping("/stats")
+    public R<Map<String, Object>> stats() {
+        return R.ok(workOrderService.getStats());
+    }
+
+    /**
+     * 工单撤销（仅待审批状态可撤销）
+     */
+    @Operation(summary = "撤销工单")
+    @PostMapping("/{id}/revoke")
+    public R<Void> revoke(@PathVariable Long id, @RequestHeader("X-User-Id") Long userId) {
+        workOrderService.revoke(id, userId);
+        return R.ok();
+    }
+
+    /**
+     * 更新工单状态（供 approve-service Feign 回调）
+     */
+    @Operation(summary = "更新工单状态（内部调用）")
+    @PutMapping("/{id}/status")
+    public R<Void> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        workOrderService.updateStatus(id, body.get("status"), body.get("remark"));
+        return R.ok();
+    }
+
+    /**
+     * 附件上传（存本地 uploads 目录，返回可访问 URL）
+     */
+    @Operation(summary = "附件上传")
+    @PostMapping("/attachment/upload")
+    public R<Map<String, String>> uploadAttachment(@RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return R.ok(workOrderService.uploadAttachment(file));
     }
 }

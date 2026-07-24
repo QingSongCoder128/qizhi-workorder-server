@@ -7,6 +7,8 @@ import com.qizhi.user.dto.UserCreateDTO;
 import com.qizhi.user.vo.LoginVO;
 import com.qizhi.user.vo.UserVO;
 
+import java.util.Map;
+
 public interface UserService {
 
     LoginVO login(LoginDTO dto);
@@ -23,7 +25,13 @@ public interface UserService {
 
     void toggleStatus(Long userId);
 
+    /** 精确设置用户状态（ENABLED/DISABLED） */
+    void setStatus(Long userId, String status);
+
     void updateProfile(Long userId, ProfileUpdateDTO dto);
 
     String getRoleCode(Long userId);
+
+    /** 管理员编辑用户（修改 realName/phone/email/deptCode/角色） */
+    void updateUser(Long id, Map<String, Object> body);
 }
