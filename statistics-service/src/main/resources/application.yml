@@ -1,0 +1,17 @@
+server:
+  port: 10007
+
+spring:
+  application:
+    name: statistics-service
+
+# 日志级别
+logging:
+  level:
+    com.qizhi: INFO
+
+springdoc:
+  api-docs:
+    enabled: true
+knife4j:
+  enable: true

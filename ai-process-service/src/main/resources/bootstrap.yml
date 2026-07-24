@@ -1,0 +1,13 @@
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 192.168.120.128:8848
+        namespace:
+      config:
+        server-addr: 192.168.120.128:8848
+        file-extension: yaml
+        namespace:
+  config:
+    import:
+      - optional:nacos:ai-process-service.yaml
