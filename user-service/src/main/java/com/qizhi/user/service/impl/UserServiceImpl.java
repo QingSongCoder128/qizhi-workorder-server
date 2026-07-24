@@ -403,4 +403,27 @@ public class UserServiceImpl implements UserService {
         }
         return vo;
     }
+
+    @Override
+    public List<UserVO> getUsersByRole(String roleCode) {
+        // 1. 查找角色 ID
+        SysRole role = roleMapper.selectOne(
+                new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, roleCode));
+        if (role == null) {
+            return Collections.emptyList();
+        }
+        // 2. 查找拥有该角色的所有用户 ID
+        List<SysUserRole> userRoles = userRoleMapper.selectList(
+                new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getRoleId, role.getId()));
+        if (userRoles.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> userIds = userRoles.stream().map(SysUserRole::getUserId).collect(Collectors.toList());
+        // 3. 查询启用状态的用户
+        List<SysUser> users = userMapper.selectList(
+                new LambdaQueryWrapper<SysUser>()
+                        .in(SysUser::getId, userIds)
+                        .eq(SysUser::getStatus, "ENABLED"));
+        return users.stream().map(this::toUserVO).collect(Collectors.toList());
+    }
 }

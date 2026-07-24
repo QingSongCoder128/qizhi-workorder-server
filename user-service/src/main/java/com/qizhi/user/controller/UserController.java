@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Tag(name = "用户管理")
@@ -116,5 +117,14 @@ public class UserController {
     public R<Void> updateUser(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         userService.updateUser(id, body);
         return R.ok();
+    }
+
+    /**
+     * 按角色编码查询用户列表（供审批转交/加签选择审批人）
+     */
+    @Operation(summary = "按角色编码查询用户列表")
+    @GetMapping("/by-role")
+    public R<List<UserVO>> getByRole(@RequestParam String roleCode) {
+        return R.ok(userService.getUsersByRole(roleCode));
     }
 }

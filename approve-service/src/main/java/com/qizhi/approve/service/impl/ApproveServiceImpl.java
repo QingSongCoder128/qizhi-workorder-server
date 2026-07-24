@@ -9,6 +9,7 @@ import com.qizhi.approve.entity.ApprovalNode;
 import com.qizhi.approve.entity.ApprovalRecord;
 import com.qizhi.approve.entity.ApprovalTemplate;
 import com.qizhi.approve.feign.MessageFeignClient;
+import com.qizhi.approve.feign.UserFeignClient;
 import com.qizhi.approve.feign.WorkOrderFeignClient;
 import com.qizhi.approve.mapper.ApprovalInstanceMapper;
 import com.qizhi.approve.mapper.ApprovalRecordMapper;
@@ -16,6 +17,7 @@ import com.qizhi.approve.service.ApproveService;
 import com.qizhi.approve.service.TemplateService;
 import com.qizhi.common.core.exception.BusinessException;
 import com.qizhi.common.core.result.PageResult;
+import com.qizhi.common.core.result.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +50,7 @@ public class ApproveServiceImpl implements ApproveService {
     private final ApprovalRecordMapper recordMapper;
     private final MessageFeignClient messageFeignClient;
     private final WorkOrderFeignClient workOrderFeignClient;
+    private final UserFeignClient userFeignClient;
     private final TemplateService templateService;
 
     /** 紧急工单超时阈值（小时），从 Nacos 读取，支持热更新 */
@@ -94,20 +97,27 @@ public class ApproveServiceImpl implements ApproveService {
                 instance.setTotalNodes(nodes.size());
                 instance.setCurrentNode(nodes.get(0).getNodeName());
                 instance.setCurrentOrder(1);
-                // 第一级审批人
-                instance.setApproverId(nodes.get(0).getApproverId());
-                instance.setApproverName(null); // 姓名由调用方补充或留空
+                // 解析第一级审批人（优先用指定ID，否则按角色匹配）
+                List<Long> assignedApproverIds = new java.util.ArrayList<>();
+                assignedApproverIds.add(dto.getSubmitterId()); // 排除提交人
+                Map<String, Object> firstApprover = resolveApprover(
+                        nodes.get(0).getApproverId(), nodes.get(0).getApproverRole(), assignedApproverIds);
+                instance.setApproverId((Long) firstApprover.get("id"));
+                instance.setApproverName((String) firstApprover.get("name"));
                 instanceMapper.insert(instance);
 
                 // 为每个节点创建 PENDING 状态的 ApprovalRecord
                 for (ApprovalNode node : nodes) {
+                    Map<String, Object> approver = resolveApprover(
+                            node.getApproverId(), node.getApproverRole(), assignedApproverIds);
+                    assignedApproverIds.add((Long) approver.get("id")); // 后续节点排除已分配的审批人
                     ApprovalRecord record = new ApprovalRecord();
                     record.setApprovalId(instance.getId());
                     record.setNodeName(node.getNodeName());
                     record.setNodeOrder(node.getNodeOrder());
                     record.setStatus("PENDING");
-                    record.setApproverId(node.getApproverId());
-                    record.setApproverName(null);
+                    record.setApproverId((Long) approver.get("id"));
+                    record.setApproverName((String) approver.get("name"));
                     recordMapper.insert(record);
                 }
                 log.info("基于模板[{}]创建审批单: id={}, 节点数={}",
@@ -359,7 +369,11 @@ public class ApproveServiceImpl implements ApproveService {
             record.setOperatorId(operatorId);
             record.setOperatorName(operatorName);
             record.setAction("TRANSFER");
-            record.setOpinion("转交给: " + dto.getTransferToUserName());
+            String transferOpinion = "转交给: " + dto.getTransferToUserName();
+            if (dto.getOpinion() != null && !dto.getOpinion().isEmpty()) {
+                transferOpinion += "，理由：" + dto.getOpinion();
+            }
+            record.setOpinion(transferOpinion);
             record.setOperatedAt(LocalDateTime.now());
             // 更新审批人为目标人
             record.setApproverId(dto.getTransferToUserId());
@@ -410,6 +424,11 @@ public class ApproveServiceImpl implements ApproveService {
         newRecord.setStatus("PENDING");
         newRecord.setApproverId(dto.getAddNodeApproverId());
         newRecord.setApproverName(dto.getAddNodeApproverName());
+        newRecord.setOperatorId(operatorId);
+        newRecord.setOperatorName(operatorName);
+        newRecord.setAction("ADD_NODE");
+        newRecord.setOpinion(dto.getOpinion() != null ? dto.getOpinion() : "加签");
+        newRecord.setOperatedAt(LocalDateTime.now());
         recordMapper.insert(newRecord);
 
         // 更新实例总节点数
@@ -444,7 +463,7 @@ public class ApproveServiceImpl implements ApproveService {
         targetRecord.setOperatorId(operatorId);
         targetRecord.setOperatorName(operatorName);
         targetRecord.setAction("REMOVE_NODE");
-        targetRecord.setOpinion("减签跳过");
+        targetRecord.setOpinion(dto.getOpinion() != null ? dto.getOpinion() : "减签跳过");
         targetRecord.setOperatedAt(LocalDateTime.now());
         recordMapper.updateById(targetRecord);
 
@@ -452,6 +471,45 @@ public class ApproveServiceImpl implements ApproveService {
     }
 
     // ==================== 私有辅助方法 ====================
+
+    /**
+     * 解析审批人：优先用指定 ID，否则按角色查找（排除已分配的人）
+     */
+    private Map<String, Object> resolveApprover(Long approverId, String approverRole, List<Long> excludeIds) {
+        Map<String, Object> result = new HashMap<>();
+        if (approverId != null) {
+            result.put("id", approverId);
+            result.put("name", null);
+            return result;
+        }
+        if (approverRole != null) {
+            try {
+                R<List<Map<String, Object>>> resp = userFeignClient.getByRole(approverRole);
+                if (resp != null && resp.getCode() == 200 && resp.getData() != null && !resp.getData().isEmpty()) {
+                    // 排除已分配的人，取下一个可用审批人
+                    for (Map<String, Object> user : resp.getData()) {
+                        Long uid = Long.valueOf(String.valueOf(user.get("id")));
+                        if (!excludeIds.contains(uid)) {
+                            result.put("id", uid);
+                            result.put("name", user.get("realName") != null ? String.valueOf(user.get("realName")) : null);
+                            return result;
+                        }
+                    }
+                    // 所有人都已分配，取第一个（允许同一人多节点）
+                    Map<String, Object> first = resp.getData().get(0);
+                    result.put("id", Long.valueOf(String.valueOf(first.get("id"))));
+                    result.put("name", first.get("realName") != null ? String.valueOf(first.get("realName")) : null);
+                    return result;
+                }
+            } catch (Exception e) {
+                log.error("按角色查找审批人失败: role={}, error={}", approverRole, e.getMessage());
+            }
+        }
+        log.warn("无法解析审批人, 使用默认管理员: approverRole={}", approverRole);
+        result.put("id", 1L);
+        result.put("name", "管理员");
+        return result;
+    }
 
     /**
      * 更新当前节点的审批记录

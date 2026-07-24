@@ -7,6 +7,7 @@ import com.qizhi.user.dto.UserCreateDTO;
 import com.qizhi.user.vo.LoginVO;
 import com.qizhi.user.vo.UserVO;
 
+import java.util.List;
 import java.util.Map;
 
 public interface UserService {
@@ -34,4 +35,7 @@ public interface UserService {
 
     /** 管理员编辑用户（修改 realName/phone/email/deptCode/角色） */
     void updateUser(Long id, Map<String, Object> body);
+
+    /** 按角色编码查询启用状态的用户列表 */
+    List<UserVO> getUsersByRole(String roleCode);
 }

@@ -134,33 +134,46 @@ public class ApproveController {
 
     /**
      * 转交审批（前端 RESTful 风格）
-     * 前端传入 targetUsername，需先查询用户 ID
+     * 支持两种传参方式：
+     * 1. 直传 transferToUserId + transferToUserName（新版前端下拉选择）
+     * 2. 传 targetUsername，后端 Feign 查询用户 ID（兼容旧版）
      */
     @Operation(summary = "转交审批")
     @PostMapping("/{id}/transfer")
     public R<Void> transfer(@PathVariable Long id,
-                            @RequestBody Map<String, String> body,
+                            @RequestBody Map<String, Object> body,
                             @RequestHeader("X-User-Id") Long userId,
                             @RequestHeader(value = "X-Username", required = false) String username) {
         ApprovalActionDTO dto = new ApprovalActionDTO();
         dto.setApprovalId(id);
         dto.setAction("TRANSFER");
-        dto.setOpinion(body.get("reason"));
-        // 通过用户名查询目标审批人ID
-        String targetUsername = body.get("targetUsername");
-        dto.setTransferToUserName(targetUsername);
-        try {
-            R<Map<String, Object>> userResult = userFeignClient.getByUsername(targetUsername);
-            if (userResult != null && userResult.getCode() == 200 && userResult.getData() != null) {
-                Object userIdObj = userResult.getData().get("id");
-                dto.setTransferToUserId(Long.valueOf(String.valueOf(userIdObj)));
-                Object realName = userResult.getData().get("realName");
-                if (realName != null) {
-                    dto.setTransferToUserName(String.valueOf(realName));
+        dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
+
+        // 方式1：前端直传 userId + userName
+        if (body.get("transferToUserId") != null) {
+            dto.setTransferToUserId(Long.valueOf(String.valueOf(body.get("transferToUserId"))));
+            dto.setTransferToUserName(body.get("transferToUserName") != null
+                    ? String.valueOf(body.get("transferToUserName")) : null);
+        } else {
+            // 方式2：通过用户名查询目标审批人 ID（兼容旧版）
+            String targetUsername = body.get("targetUsername") != null
+                    ? String.valueOf(body.get("targetUsername")) : null;
+            dto.setTransferToUserName(targetUsername);
+            if (targetUsername != null) {
+                try {
+                    R<Map<String, Object>> userResult = userFeignClient.getByUsername(targetUsername);
+                    if (userResult != null && userResult.getCode() == 200 && userResult.getData() != null) {
+                        Object userIdObj = userResult.getData().get("id");
+                        dto.setTransferToUserId(Long.valueOf(String.valueOf(userIdObj)));
+                        Object realName = userResult.getData().get("realName");
+                        if (realName != null) {
+                            dto.setTransferToUserName(String.valueOf(realName));
+                        }
+                    }
+                } catch (Exception e) {
+                    // 用户查询失败时仍然继续
                 }
             }
-        } catch (Exception e) {
-            // 用户查询失败时仍然继续，使用用户名作为备注
         }
         approveService.action(dto, userId, username);
         return R.ok();
@@ -183,6 +196,7 @@ public class ApproveController {
             dto.setAddNodeApproverId(Long.valueOf(String.valueOf(body.get("approverId"))));
         }
         dto.setAddNodeApproverName((String) body.get("approverName"));
+        dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
         approveService.action(dto, userId, username);
         return R.ok();
     }
@@ -202,6 +216,7 @@ public class ApproveController {
         if (body.get("nodeOrder") != null) {
             dto.setRemoveNodeOrder(Integer.valueOf(String.valueOf(body.get("nodeOrder"))));
         }
+        dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
         approveService.action(dto, userId, username);
         return R.ok();
     }
