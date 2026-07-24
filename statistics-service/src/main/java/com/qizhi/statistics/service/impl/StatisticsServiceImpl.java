@@ -114,8 +114,9 @@ public class StatisticsServiceImpl implements StatisticsService {
         Map<String, Object> dashboard = new LinkedHashMap<>();
         dashboard.put("totalCount", 0);
         dashboard.put("pendingCount", 0);
+        dashboard.put("approvedCount", 0);
         dashboard.put("completedCount", 0);
-        dashboard.put("timeoutCount", 0);
+        dashboard.put("rejectedCount", 0);
         dashboard.put("deptDistribution", Collections.emptyList());
         dashboard.put("trend", Collections.emptyList());
         return dashboard;

@@ -439,16 +439,16 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         int totalCount = allOrders.size();
         int pendingCount = (int) allOrders.stream()
-                .filter(o -> "PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
+                .filter(o -> "PENDING_AI".equals(o.getStatus()) || "PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
+                .count();
+        int approvedCount = (int) allOrders.stream()
+                .filter(o -> "APPROVED".equals(o.getStatus()))
                 .count();
         int completedCount = (int) allOrders.stream()
                 .filter(o -> "COMPLETED".equals(o.getStatus()))
                 .count();
-        // 超时工单：状态为待审批/审批中 且创建超过4小时
-        LocalDateTime timeoutThreshold = LocalDateTime.now().minusHours(4);
-        int timeoutCount = (int) allOrders.stream()
-                .filter(o -> ("PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
-                        && o.getCreatedAt() != null && o.getCreatedAt().isBefore(timeoutThreshold))
+        int rejectedCount = (int) allOrders.stream()
+                .filter(o -> "REJECTED".equals(o.getStatus()))
                 .count();
 
         // 各部门工单分布
@@ -487,8 +487,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("totalCount", totalCount);
         result.put("pendingCount", pendingCount);
+        result.put("approvedCount", approvedCount);
         result.put("completedCount", completedCount);
-        result.put("timeoutCount", timeoutCount);
+        result.put("rejectedCount", rejectedCount);
         result.put("deptDistribution", deptDistribution);
         result.put("trend", trend);
         return result;
