@@ -22,6 +22,9 @@ public class SysUser {
 
     private String email;
 
+    /** 头像文件URL */
+    private String avatarUrl;
+
     private String deptCode;
 
     /** ENABLED/DISABLED/LOCKED */

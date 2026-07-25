@@ -41,7 +41,8 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     /** 白名单路径（无需鉴权） */
     private static final List<String> WHITE_LIST = List.of(
             "/api/v1/auth/login",
-            "/api/v1/auth/register"
+            "/api/v1/auth/register",
+            "/api/v1/user/avatar"
     );
 
     /**
@@ -62,10 +63,15 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
+        String method = exchange.getRequest().getMethod() != null
+                ? exchange.getRequest().getMethod().name() : "GET";
 
-        // 白名单放行
+        // 白名单放行（头像路径仅 GET 获取免鉴权，POST 上传仍需正常鉴权）
         for (String white : WHITE_LIST) {
             if (path.startsWith(white)) {
+                if ("/api/v1/user/avatar".equals(white) && !"GET".equals(method)) {
+                    break; // 头像上传等非 GET 请求走下方正常鉴权流程
+                }
                 return chain.filter(exchange);
             }
         }

@@ -192,6 +192,44 @@ public class ApproveServiceImpl implements ApproveService {
     }
 
     @Override
+    public Map<String, Object> getPendingStats(Long approverId) {
+        // 查询当前用户所有待审批实例
+        List<ApprovalInstance> pendingList = instanceMapper.selectList(
+                new LambdaQueryWrapper<ApprovalInstance>()
+                        .eq(ApprovalInstance::getApproverId, approverId)
+                        .in(ApprovalInstance::getStatus, "PENDING", "APPROVING"));
+
+        long total = pendingList.size();
+        long urgentCount = pendingList.stream()
+                .filter(i -> "URGENT".equals(i.getPriority())).count();
+
+        // 超时判定：URGENT 1h / NORMAL 4h / LOW 12h
+        LocalDateTime now = LocalDateTime.now();
+        long timeoutCount = pendingList.stream().filter(i -> {
+            int hours = "URGENT".equals(i.getPriority()) ? 1
+                    : "LOW".equals(i.getPriority()) ? 12 : 4;
+            return i.getCreatedAt() != null
+                    && i.getCreatedAt().plusHours(hours).isBefore(now);
+        }).count();
+
+        // 今日已处理数：按审批记录维度统计（当前用户今日实际操作的通过/驳回数）
+        // 多级审批下审批人只处理自己那级节点，实例整体未必完结，故不能按实例维度统计
+        LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
+        Long todayCompleted = recordMapper.selectCount(
+                new LambdaQueryWrapper<ApprovalRecord>()
+                        .eq(ApprovalRecord::getOperatorId, approverId)
+                        .in(ApprovalRecord::getAction, "APPROVED", "REJECTED")
+                        .ge(ApprovalRecord::getOperatedAt, todayStart));
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("total", total);
+        stats.put("urgentCount", urgentCount);
+        stats.put("timeoutCount", timeoutCount);
+        stats.put("todayCompletedCount", todayCompleted);
+        return stats;
+    }
+
+    @Override
     public long countApproving() {
         return instanceMapper.selectCount(
                 new LambdaQueryWrapper<ApprovalInstance>()

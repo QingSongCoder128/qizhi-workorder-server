@@ -16,5 +16,8 @@ Thumbs.db
 # Logs
 *.log
 
-# ��־���Ŀ¼
+# ��־���Ŀ¼
 logs/
+
+# 运行时上传文件（头像/附件）
+uploads/

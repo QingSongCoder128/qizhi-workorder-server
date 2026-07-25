@@ -148,6 +148,9 @@ public class UserServiceImpl implements UserService {
                 .username(user.getUsername())
                 .realName(user.getRealName())
                 .deptCode(user.getDeptCode())
+                .phone(user.getPhone())
+                .email(user.getEmail())
+                .avatarUrl(user.getAvatarUrl())
                 .build();
     }
 
@@ -383,6 +386,7 @@ public class UserServiceImpl implements UserService {
                 .realName(user.getRealName())
                 .phone(user.getPhone())
                 .email(user.getEmail())
+                .avatarUrl(user.getAvatarUrl())
                 .deptCode(user.getDeptCode())
                 .status(user.getStatus())
                 .createdAt(user.getCreatedAt())

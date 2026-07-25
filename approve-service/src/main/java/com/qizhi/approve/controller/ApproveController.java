@@ -61,6 +61,15 @@ public class ApproveController {
     }
 
     /**
+     * 待审批统计（总数/紧急数/超时数/今日已处理数，供前端统计卡片展示）
+     */
+    @Operation(summary = "待审批统计")
+    @GetMapping("/pending/stats")
+    public R<Map<String, Object>> pendingStats(@RequestHeader("X-User-Id") Long userId) {
+        return R.ok(approveService.getPendingStats(userId));
+    }
+
+    /**
      * 统计 APPROVING（审批中）实例数（供 work-order-service 统计看板 Feign 调用）
      */
     @Operation(summary = "审批中实例数（供 Feign 调用）")

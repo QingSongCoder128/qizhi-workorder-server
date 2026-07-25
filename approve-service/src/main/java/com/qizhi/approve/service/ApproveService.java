@@ -33,6 +33,9 @@ public interface ApproveService {
     /** 待审批列表（按审批人过滤，状态为 PENDING/APPROVING，支持排序） */
     PageResult<ApprovalInstance> getPending(Long approverId, Integer current, Integer size, String sortBy, String order);
 
+    /** 待审批统计（总数/紧急数/超时数/今日已处理数，供前端统计卡片展示） */
+    Map<String, Object> getPendingStats(Long approverId);
+
     /** 统计处于 APPROVING（审批中，首节点已通过、流转中）状态的审批实例数，供统计看板使用 */
     long countApproving();
 
