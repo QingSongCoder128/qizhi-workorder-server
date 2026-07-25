@@ -1,6 +1,6 @@
 package com.qizhi.ai.agent;
 
-import com.qizhi.ai.client.DeepSeekClient;
+import com.qizhi.ai.client.AiModelClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -9,14 +9,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 评级 Agent - 调用 DeepSeek 判定工单优先级
+ * 评级 Agent - 调用 AI 大模型判定工单优先级
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RatingAgent {
 
-    private final DeepSeekClient deepSeekClient;
+    private final AiModelClient aiModelClient;
 
     private static final String SYSTEM_PROMPT = """
             你是一个工单优先级评定助手。根据工单信息判断其紧急程度。
@@ -34,7 +34,7 @@ public class RatingAgent {
             String userPrompt = String.format(
                     "工单类型: %s\n是否标记紧急: %s\n工单标题: %s",
                     type, Boolean.TRUE.equals(urgent) ? "是" : "否", title);
-            Map<String, Object> aiResult = deepSeekClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
+            Map<String, Object> aiResult = aiModelClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
 
             String priority = String.valueOf(aiResult.getOrDefault("priority", "NORMAL"));
             String reason = String.valueOf(aiResult.getOrDefault("priorityReason", "AI综合评估"));
@@ -60,6 +60,7 @@ public class RatingAgent {
         result.put("priority", priority);
         result.put("priorityReason", reason);
         result.put("durationMs", System.currentTimeMillis() - start);
+        result.put("fallback", true);
         return result;
     }
 }

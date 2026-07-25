@@ -39,10 +39,13 @@ public class WorkOrderController {
                                            @RequestParam(required = false) Integer size,
                                            @RequestParam(required = false) Integer page,
                                            @RequestParam(required = false) Integer pageSize,
-                                           @RequestParam(required = false) String status) {
+                                           @RequestParam(required = false) String status,
+                                           @RequestParam(required = false) String type,
+                                           @RequestParam(required = false) String priority,
+                                           @RequestParam(required = false) String keyword) {
         int c = (current != null) ? current : (page != null ? page : 1);
         int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
-        return R.ok(workOrderService.getMyList(userId, c, s, status));
+        return R.ok(workOrderService.getMyList(userId, c, s, status, type, priority, keyword));
     }
 
     @Operation(summary = "工单详情")

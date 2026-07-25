@@ -22,7 +22,7 @@ public interface WorkOrderService {
      */
     void updateStatusAndCreateApproval(WorkOrder order, Long userId, String username);
 
-    PageResult<WorkOrder> getMyList(Long userId, Integer current, Integer size, String status);
+    PageResult<WorkOrder> getMyList(Long userId, Integer current, Integer size, String status, String type, String priority, String keyword);
 
     /** 管理员全量工单列表（支持状态/类型/关键词筛选） */
     PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String keyword);

@@ -89,6 +89,17 @@ public class UserController {
         return R.ok();
     }
 
+    @Operation(summary = "修改密码")
+    @PutMapping("/password")
+    public R<Void> changePassword(@RequestHeader("X-User-Id") Long userId,
+                                  @RequestBody Map<String, String> body) {
+        ProfileUpdateDTO dto = new ProfileUpdateDTO();
+        dto.setOldPassword(body.get("oldPassword"));
+        dto.setNewPassword(body.get("newPassword"));
+        userService.updateProfile(userId, dto);
+        return R.ok();
+    }
+
     /**
      * 按用户名查询用户信息（供其他微服务 Feign 调用）
      */

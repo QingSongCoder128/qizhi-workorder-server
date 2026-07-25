@@ -26,17 +26,17 @@ import java.util.Set;
  * 督办消息消费者
  * <p>
  * SRS 需求: MSG-03 督办提醒
- * 接收从 delay.remind.queue 死信转发过来的延迟消息，
+ * 监听 remind.fire.queue，接收从三个优先级延迟队列（remind.delay.urgent/normal/low.queue）
+ * 以及重试队列（remind.delay.retry.queue）TTL 过期后死信转发过来的消息。
  * 检查工单状态，若仍在审批中则生成督办站内信，并安排下次督办。
  * </p>
  * <p>
  * 督办策略:
- *   1. 查询 delayed_task 表获取工单信息
- *   2. Feign 调用 work-order-service 查询工单当前状态
- *   3. 若仍为 PENDING_APPROVE/APPROVING → 生成督办站内信
- *   4. remind_count + 1
- *   5. 若 remind_count < max_remind(3) → 重新发送延迟消息（2小时后再次提醒）
- *   6. 若 remind_count >= 3 → 升级通知上级领导
+ *   1. Feign 调用 work-order-service 查询工单当前状态
+ *   2. 若仍为 PENDING_APPROVE/APPROVING → 生成督办站内信
+ *   3. remind_count + 1
+ *   4. 若 remind_count < max_remind(3) → 发送到 remind.delay.retry.queue（固定 TTL 后再次提醒）
+ *   5. 若 remind_count >= 3 → 升级通知上级领导
  * </p>
  */
 @Slf4j
@@ -58,20 +58,15 @@ public class RemindConsumer {
     @Value("${remind.max-count:3}")
     private int maxRemindCount;
 
-    /** 再次督办延迟时间（毫秒），从 Nacos 读取，默认 2 小时 */
-    @Value("${remind.re-delay-ms:7200000}")
-    private long reRemindDelayMs;
-
     @RabbitListener(queues = "remind.fire.queue")
-    public void onMessage(Object message, Channel channel,
+    public void onMessage(Map<String, Object> msgMap, Channel channel,
                           @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) {
         try {
-            log.info("消费延迟督办消息: {}", message);
+            log.info("消费延迟督办消息: {}", msgMap);
 
-            // 解析消息体（Map 格式）
-            Map<String, Object> msgMap = parseMessage(message);
+            // 验证消息体
             if (msgMap == null || msgMap.get("workOrderId") == null) {
-                log.warn("督办消息格式无效，跳过: {}", message);
+                log.warn("督办消息格式无效，跳过: {}", msgMap);
                 channel.basicAck(deliveryTag, false);
                 return;
             }
@@ -142,10 +137,10 @@ public class RemindConsumer {
 
             // 5. 决定是否继续督办
             if (remindCount < maxRemind) {
-                // 重新发送延迟消息（2小时后再次提醒）
+                // 重新发送延迟消息到重试队列（remind.delay.retry.queue，固定 TTL=re-delay-ms）
                 Map<String, Object> reRemindMsg = new HashMap<>(msgMap);
                 reRemindMsg.put("delayedTaskId", delayedTaskId);
-                messageProducer.sendDelayRemind(reRemindMsg, reRemindDelayMs);
+                messageProducer.sendRetryRemind(reRemindMsg);
                 log.info("督办已安排下次提醒: workOrderId={}, remindCount={}/{}", workOrderId, remindCount, maxRemind);
             } else {
                 // 督办次数用尽，发送升级通知给提交人
@@ -201,17 +196,4 @@ public class RemindConsumer {
         delayedTaskMapper.update(null, wrapper);
     }
 
-    /**
-     * 解析消息体为 Map（兼容不同格式）
-     */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseMessage(Object message) {
-        if (message instanceof Map) {
-            return (Map<String, Object>) message;
-        }
-        if (message instanceof String) {
-            log.warn("消息类型为 String，无法解析: {}", message);
-        }
-        return null;
-    }
 }

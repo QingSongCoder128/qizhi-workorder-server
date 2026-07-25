@@ -10,9 +10,19 @@ spring:
     username: admin
     password: admin
     virtual-host: /
+    # Publisher Confirm（异步确认）: 消息到达 Exchange 后异步回调确认
+    #   correlated = 不阻塞生产者，通过 ConfirmCallback 异步通知投递结果
+    publisher-confirm-type: correlated
+    # Publisher Return: 消息无法路由到任何 Queue 时退回给生产者
+    #   配合 ReturnCallback 捕获路由失败消息，写入死信表做补偿
+    publisher-returns: true
     listener:
       simple:
+        # 手动 ACK: 消费者处理完业务后手动 basicAck/basicNack
+        #   防止自动 ACK 模式下消费异常导致消息丢失
         acknowledge-mode: manual
+        # 预取数量（QoS）: 每个消费者最多同时拉取 10 条未确认消息
+        #   实现消费者间负载均衡，避免单消费者内存堆积
         prefetch: 10
 
 # 日志级别

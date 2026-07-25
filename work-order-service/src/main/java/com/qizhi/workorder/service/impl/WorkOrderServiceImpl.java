@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qizhi.common.core.constant.CommonConstants;
 import com.qizhi.common.core.exception.BusinessException;
 import com.qizhi.common.core.result.PageResult;
+import com.qizhi.common.core.result.R;
 import com.qizhi.common.redis.util.RedisUtil;
 import com.qizhi.workorder.dto.WorkOrderSubmitDTO;
 import com.qizhi.workorder.entity.WorkOrder;
@@ -75,6 +76,18 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Value("${workorder.seq-expire-seconds:172800}")
     private int seqExpireSeconds;
 
+    /** 超时阈值-加急（分钟），从 Nacos 读取，默认 60 */
+    @Value("${workorder.timeout.urgent-minutes:60}")
+    private long timeoutUrgentMinutes;
+
+    /** 超时阈值-普通（分钟），从 Nacos 读取，默认 240 */
+    @Value("${workorder.timeout.normal-minutes:240}")
+    private long timeoutNormalMinutes;
+
+    /** 超时阈值-低优先级（分钟），从 Nacos 读取，默认 720 */
+    @Value("${workorder.timeout.low-minutes:720}")
+    private long timeoutLowMinutes;
+
     /**
      * 自注入代理（解决同类中 @GlobalTransactional / @Transactional 不生效问题）
      * 通过 @Lazy 延迟注入，避免循环依赖
@@ -115,6 +128,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
             // ---- 第四阶段: 异步通知（事务外执行，失败不影响主流程） ----
             sendSubmitNotification(order, userId);
+
+            // ---- 第五阶段: 触发延迟督办（MS-04/MS-05，根据优先级设置不同延迟时长） ----
+            sendDelayRemind(order);
 
             return order;
         } finally {
@@ -193,6 +209,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 if (aiData.get("priority") != null) {
                     order.setPriority(String.valueOf(aiData.get("priority")));
                 }
+                // BUG-003 FIX: 读取 AI 服务返回的异常标记（降级/繁忙）
+                if (Boolean.TRUE.equals(aiData.get("aiAbnormal"))) {
+                    order.setAiAbnormal(true);
+                }
             }
         } catch (Exception e) {
             // AI 异常不阻断工单流转，标记异常供审批人参考
@@ -221,6 +241,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         // ---- work-order-service 本地操作：更新工单状态为待审批 ----
         order.setStatus(CommonConstants.STATUS_PENDING_APPROVE);
+        // WO-14: 将全局事务 ID XID 存入工单记录，供问题溯源
+        order.setSeataXid(io.seata.core.context.RootContext.getXID());
         workOrderMapper.updateById(order);
         saveHistory(order.getId(), CommonConstants.STATUS_PENDING_AI,
                 CommonConstants.STATUS_PENDING_APPROVE, userId, username, "AI预处理完成，进入审批流程");
@@ -267,13 +289,45 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
     }
 
+    /**
+     * 触发延迟督办（MS-04/MS-05）
+     * 工单进入待审批状态后，根据优先级设置不同延迟时长：
+     * URGENT=60分钟、NORMAL=240分钟、LOW=720分钟
+     * 超时未审批则自动发送督办提醒
+     */
+    private void sendDelayRemind(WorkOrder order) {
+        try {
+            Map<String, Object> remindRequest = new HashMap<>();
+            remindRequest.put("workOrderId", order.getId());
+            remindRequest.put("orderNo", order.getOrderNo());
+            remindRequest.put("title", order.getTitle());
+            remindRequest.put("priority", order.getPriority());
+            remindRequest.put("submitterId", order.getSubmitterId());
+            remindRequest.put("approverId", order.getCurrentApproverId());
+            messageFeignClient.sendDelayRemind(remindRequest);
+            log.info("延迟督办已触发: orderNo={}, priority={}", order.getOrderNo(), order.getPriority());
+        } catch (Exception e) {
+            // 督办触发失败不影响主流程
+            log.error("延迟督办触发失败（不影响工单提交）: {}", e.getMessage());
+        }
+    }
+
     @Override
-    public PageResult<WorkOrder> getMyList(Long userId, Integer current, Integer size, String status) {
+    public PageResult<WorkOrder> getMyList(Long userId, Integer current, Integer size, String status, String type, String priority, String keyword) {
         Page<WorkOrder> page = new Page<>(current, size);
         LambdaQueryWrapper<WorkOrder> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(WorkOrder::getSubmitterId, userId);
         if (StringUtils.hasText(status)) {
             wrapper.eq(WorkOrder::getStatus, status);
+        }
+        if (StringUtils.hasText(type)) {
+            wrapper.eq(WorkOrder::getType, type);
+        }
+        if (StringUtils.hasText(priority)) {
+            wrapper.eq(WorkOrder::getPriority, priority);
+        }
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(WorkOrder::getTitle, keyword).or().like(WorkOrder::getOrderNo, keyword));
         }
         wrapper.orderByDesc(WorkOrder::getCreatedAt);
         Page<WorkOrder> result = workOrderMapper.selectPage(page, wrapper);
@@ -350,7 +404,6 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void resubmit(Long id, WorkOrderSubmitDTO dto, Long userId, String username) {
         WorkOrder order = workOrderMapper.selectById(id);
         if (order == null) {
@@ -363,18 +416,24 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException("只能重新提交自己的工单");
         }
 
-        // 更新工单内容
+        // 更新工单内容，状态回到 PENDING_AI，重新走 AI 预审流程
         order.setType(dto.getType());
         order.setTitle(dto.getTitle());
         order.setDetail(dto.getDetail());
         order.setDepartmentCode(dto.getDepartmentCode());
         order.setUrgent(dto.getUrgent());
-        order.setStatus(CommonConstants.STATUS_PENDING_APPROVE);
+        order.setStatus(CommonConstants.STATUS_PENDING_AI);
         order.setVersionNo(order.getVersionNo() + 1);
         workOrderMapper.updateById(order);
 
-        saveHistory(id, CommonConstants.STATUS_REJECTED, CommonConstants.STATUS_PENDING_APPROVE,
-                userId, username, "重新提交，版本号:" + order.getVersionNo());
+        saveHistory(id, CommonConstants.STATUS_REJECTED, CommonConstants.STATUS_PENDING_AI,
+                userId, username, "重新提交，版本号:" + order.getVersionNo() + "，重新进入AI预审");
+
+        // 重新触发 AI 智能预处理（失败不阻断流程）
+        processAI(order);
+
+        // Seata 分布式事务：更新状态为待审批 + 创建新审批单
+        self.updateStatusAndCreateApproval(order, userId, username);
     }
 
     @Override
@@ -438,12 +497,22 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         List<WorkOrder> allOrders = workOrderMapper.selectList(new LambdaQueryWrapper<>());
 
         int totalCount = allOrders.size();
-        int pendingCount = (int) allOrders.stream()
+        // 待处理总量（工单状态 PENDING_AI / PENDING_APPROVE / APPROVING）
+        int pendingTotal = (int) allOrders.stream()
                 .filter(o -> "PENDING_AI".equals(o.getStatus()) || "PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
                 .count();
-        int approvedCount = (int) allOrders.stream()
-                .filter(o -> "APPROVED".equals(o.getStatus()))
-                .count();
+        // “审批中” = 审批实例处于 APPROVING（首节点已通过、流转中）的数量；Feign 失败时降级为 0
+        int approvingInstances = 0;
+        try {
+            R<Long> approvingResult = approveFeignClient.countApproving();
+            if (approvingResult != null && approvingResult.getCode() == 200 && approvingResult.getData() != null) {
+                approvingInstances = approvingResult.getData().intValue();
+            }
+        } catch (Exception e) {
+            log.warn("获取审批中实例数失败，看板“审批中”降级为0: {}", e.getMessage());
+        }
+        int approvedCount = approvingInstances;                          // 审批中
+        int pendingCount = Math.max(pendingTotal - approvingInstances, 0); // 待审批（扣除已流转）
         int completedCount = (int) allOrders.stream()
                 .filter(o -> "COMPLETED".equals(o.getStatus()))
                 .count();
@@ -451,10 +520,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .filter(o -> "REJECTED".equals(o.getStatus()))
                 .count();
 
-        // 各部门工单分布
+        // 各部门工单分布（与 sys_department 实际部门对齐）
         Map<String, String> deptNames = Map.of(
                 "DEPT_IT", "运维部", "DEPT_ADMIN", "行政部",
-                "DEPT_HR", "人事部", "DEPT_TECH", "技术部");
+                "DEPT_HR", "人事部", "DEPT_TECH", "技术部",
+                "DEPT_FIN", "财务部");
         Map<String, Long> deptCounts = allOrders.stream()
                 .filter(o -> o.getDepartmentCode() != null)
                 .collect(Collectors.groupingBy(WorkOrder::getDepartmentCode, Collectors.counting()));
@@ -492,6 +562,32 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         result.put("rejectedCount", rejectedCount);
         result.put("deptDistribution", deptDistribution);
         result.put("trend", trend);
+
+        // 平均审批时长（分钟）：已完结工单从创建到完成的平均耗时
+        long totalMinutes = allOrders.stream()
+                .filter(o -> "COMPLETED".equals(o.getStatus()) && o.getCreatedAt() != null && o.getCompletedAt() != null)
+                .mapToLong(o -> java.time.Duration.between(o.getCreatedAt(), o.getCompletedAt()).toMinutes())
+                .sum();
+        long completedWithTime = allOrders.stream()
+                .filter(o -> "COMPLETED".equals(o.getStatus()) && o.getCreatedAt() != null && o.getCompletedAt() != null)
+                .count();
+        result.put("avgApproveMinutes", completedWithTime > 0 ? totalMinutes / completedWithTime : 0);
+
+        // ST-01: 超时工单数 — 处于待审批/审批中且超过对应优先级阈值的工单
+        LocalDateTime now = LocalDateTime.now();
+        long timeoutCount = allOrders.stream()
+                .filter(o -> ("PENDING_APPROVE".equals(o.getStatus()) || "APPROVING".equals(o.getStatus()))
+                        && o.getCreatedAt() != null)
+                .filter(o -> {
+                    long minutes = java.time.Duration.between(o.getCreatedAt(), now).toMinutes();
+                    String priority = o.getPriority();
+                    long threshold = "URGENT".equals(priority) ? timeoutUrgentMinutes
+                            : "LOW".equals(priority) ? timeoutLowMinutes : timeoutNormalMinutes;
+                    return minutes > threshold;
+                })
+                .count();
+        result.put("timeoutCount", timeoutCount);
+
         return result;
     }
 
@@ -533,6 +629,25 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         workOrderMapper.updateById(order);
         saveHistory(id, fromStatus, status, null, "system", remark != null ? remark : "审批状态变更");
+
+        // ST-03: 工单状态变更时主动失效统计缓存，下次查询时重新计算
+        invalidateStatsCache();
+    }
+
+    /**
+     * 清除统计看板 Redis 缓存（ST-03）
+     * 工单状态变更后调用，确保看板数据实时性
+     */
+    private void invalidateStatsCache() {
+        try {
+            String[] deptCodes = {"ALL", "DEPT_IT", "DEPT_ADMIN", "DEPT_HR", "DEPT_TECH", "DEPT_FIN"};
+            for (String dept : deptCodes) {
+                redisUtil.delete(CommonConstants.STATS_DASHBOARD_PREFIX + dept);
+            }
+            log.debug("统计缓存已失效");
+        } catch (Exception e) {
+            log.warn("统计缓存失效失败（不影响主流程）: {}", e.getMessage());
+        }
     }
 
     /**
@@ -567,6 +682,17 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     public String generateOrderNo() {
         String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String key = "workorder:seq:" + dateStr;
+        // 序号计数器缺失时（如 Redis 重建/清空后首次创建），从数据库当天最大序号初始化，
+        // 避免新生成的工单编号与已有数据（如导入的演示数据）发生 UNIQUE 冲突
+        if (!Boolean.TRUE.equals(redisUtil.hasKey(key))) {
+            Long maxSeq = workOrderMapper.selectMaxSeqByDate(dateStr);
+            if (maxSeq != null && maxSeq > 0) {
+                // INCRBY 为原生数值命令，不走 Jackson 序列化，key 不存在时直接初始化为 maxSeq
+                redisUtil.incrementBy(key, maxSeq);
+                redisUtil.expire(key, seqExpireSeconds, java.util.concurrent.TimeUnit.SECONDS);
+                log.info("工单序号计数器从数据库初始化: date={}, maxSeq={}", dateStr, maxSeq);
+            }
+        }
         Long seq = redisUtil.increment(key);
         // 设置过期时间
         if (seq == 1L) {

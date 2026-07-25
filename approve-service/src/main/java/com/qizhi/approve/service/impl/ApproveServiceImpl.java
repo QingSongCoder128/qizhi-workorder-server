@@ -74,6 +74,10 @@ public class ApproveServiceImpl implements ApproveService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApprovalInstance createApproval(ApprovalCreateDTO dto) {
+        // Seata 回滚测试故障注入开关（测试完成后立即关闭）
+        if (Boolean.getBoolean("seata.test.fault")) {
+            throw new RuntimeException("[Seata Test] 模拟审批服务故障，触发全局事务回滚");
+        }
         // 1. 匹配审批模板
         ApprovalTemplate template = templateService.matchTemplate(
                 dto.getDepartmentCode(), dto.getWorkType());
@@ -87,12 +91,22 @@ public class ApproveServiceImpl implements ApproveService {
         instance.setDetail(dto.getDetail());
         instance.setDepartmentCode(dto.getDepartmentCode());
         instance.setPriority(dto.getPriority());
+        instance.setWorkType(dto.getWorkType());
         instance.setStatus("PENDING");
 
         if (template != null) {
             // 2. 有模板：读取节点定义，创建多级审批记录
             List<ApprovalNode> nodes = templateService.getTemplateNodes(template.getId());
             if (nodes != null && !nodes.isEmpty()) {
+                // AP-02: 加急工单减少审批层级（仅保留第一级和最后一级，跳过中间节点）
+                if ("URGENT".equals(dto.getPriority()) && nodes.size() > 2) {
+                    List<ApprovalNode> urgentNodes = new java.util.ArrayList<>();
+                    urgentNodes.add(nodes.get(0));               // 保留第一级
+                    urgentNodes.add(nodes.get(nodes.size() - 1)); // 保留最后一级
+                    log.info("AP-02 加急路径: 原审批节点数={}, 加急后节点数={}", nodes.size(), urgentNodes.size());
+                    nodes = urgentNodes;
+                }
+
                 instance.setTemplateId(template.getId());
                 instance.setTotalNodes(nodes.size());
                 instance.setCurrentNode(nodes.get(0).getNodeName());
@@ -122,6 +136,10 @@ public class ApproveServiceImpl implements ApproveService {
                 }
                 log.info("基于模板[{}]创建审批单: id={}, 节点数={}",
                         template.getTemplateName(), instance.getId(), nodes.size());
+                // BUG-001 FIX: 通知第一级审批人有新的待审批工单
+                sendNotification(instance.getApproverId(), "新的待审批工单",
+                        "工单[" + instance.getOrderNo() + "]等待您审批，请及时处理",
+                        "APPROVE_NOTIFY", instance.getWorkOrderId());
                 return instance;
             }
         }
@@ -146,6 +164,10 @@ public class ApproveServiceImpl implements ApproveService {
 
         log.warn("未匹配模板，使用默认单节点审批: workOrderId={}, approvalId={}",
                 dto.getWorkOrderId(), instance.getId());
+        // BUG-001 FIX: 通知默认审批人
+        sendNotification(instance.getApproverId(), "新的待审批工单",
+                "工单[" + instance.getOrderNo() + "]等待您审批，请及时处理",
+                "APPROVE_NOTIFY", instance.getWorkOrderId());
         return instance;
     }
 
@@ -154,14 +176,26 @@ public class ApproveServiceImpl implements ApproveService {
      * 按审批人 ID 过滤，返回 PENDING/APPROVING 状态的审批单
      */
     @Override
-    public PageResult<ApprovalInstance> getPending(Long approverId, Integer current, Integer size) {
+    public PageResult<ApprovalInstance> getPending(Long approverId, Integer current, Integer size, String sortBy, String order) {
         Page<ApprovalInstance> page = new Page<>(current, size);
         LambdaQueryWrapper<ApprovalInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ApprovalInstance::getApproverId, approverId)
-                .in(ApprovalInstance::getStatus, "PENDING", "APPROVING")
-                .orderByAsc(ApprovalInstance::getCreatedAt);
+                .in(ApprovalInstance::getStatus, "PENDING", "APPROVING");
+        boolean isAsc = "asc".equalsIgnoreCase(order);
+        if ("priority".equals(sortBy)) {
+            wrapper.orderBy(true, isAsc, ApprovalInstance::getPriority);
+        } else {
+            wrapper.orderBy(true, isAsc, ApprovalInstance::getCreatedAt);
+        }
         Page<ApprovalInstance> result = instanceMapper.selectPage(page, wrapper);
         return PageResult.of(result.getCurrent(), result.getSize(), result.getTotal(), result.getRecords());
+    }
+
+    @Override
+    public long countApproving() {
+        return instanceMapper.selectCount(
+                new LambdaQueryWrapper<ApprovalInstance>()
+                        .eq(ApprovalInstance::getStatus, "APPROVING"));
     }
 
     /**
@@ -183,6 +217,11 @@ public class ApproveServiceImpl implements ApproveService {
         }
         if (!"PENDING".equals(instance.getStatus()) && !"APPROVING".equals(instance.getStatus())) {
             throw new BusinessException("该审批单已结束，无法操作");
+        }
+
+        // SRS 业务规则：审批人不能审批自己提交的工单
+        if (instance.getSubmitterId() != null && instance.getSubmitterId().equals(operatorId)) {
+            throw new BusinessException("不能审批自己提交的工单");
         }
 
         switch (dto.getAction()) {
@@ -243,6 +282,29 @@ public class ApproveServiceImpl implements ApproveService {
         workOrder.put("currentNode", instance.getCurrentNode());
         workOrder.put("currentOrder", instance.getCurrentOrder());
         workOrder.put("totalNodes", instance.getTotalNodes());
+        workOrder.put("type", instance.getWorkType());
+        workOrder.put("createdAt", instance.getCreatedAt());
+
+        // 通过 Feign 补充工单详情（AI 分析等字段），失败时不影响审批主流程
+        try {
+            R<Map<String, Object>> orderRes = workOrderFeignClient.getDetailById(instance.getWorkOrderId());
+            if (orderRes != null && orderRes.getCode() != null && orderRes.getCode() == 200 && orderRes.getData() != null) {
+                Map<String, Object> order = orderRes.getData();
+                workOrder.put("aiCategory", order.get("aiCategory"));
+                workOrder.put("aiConfidence", order.get("aiConfidence"));
+                workOrder.put("aiPriorityReason", order.get("aiPriorityReason"));
+                workOrder.put("aiSuggestion", order.get("aiSuggestion"));
+                workOrder.put("aiSensitiveWords", order.get("aiSensitiveWords"));
+                if (order.get("type") != null) {
+                    workOrder.put("type", order.get("type"));
+                }
+                if (order.get("createdAt") != null) {
+                    workOrder.put("createdAt", order.get("createdAt"));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取工单详情失败（AI字段将不展示）: workOrderId={}, err={}", instance.getWorkOrderId(), e.getMessage());
+        }
 
         // 获取审批节点列表
         List<ApprovalRecord> nodes = recordMapper.selectList(
@@ -330,6 +392,12 @@ public class ApproveServiceImpl implements ApproveService {
             instanceMapper.updateById(instance);
             log.info("进入下一级审批: approvalId={}, nextOrder={}", instance.getId(),
                     nextRecord != null ? nextRecord.getNodeOrder() : "完结");
+            // BUG-001 FIX: 通知下一级审批人
+            if (nextRecord != null) {
+                sendNotification(nextRecord.getApproverId(), "新的待审批工单",
+                        "工单[" + instance.getOrderNo() + "]已流转至您审批，请及时处理",
+                        "APPROVE_NOTIFY", instance.getWorkOrderId());
+            }
         }
     }
 

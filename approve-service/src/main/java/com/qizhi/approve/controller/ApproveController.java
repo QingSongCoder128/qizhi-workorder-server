@@ -52,10 +52,21 @@ public class ApproveController {
                                                     @RequestParam(required = false) Integer current,
                                                     @RequestParam(required = false) Integer size,
                                                     @RequestParam(required = false) Integer page,
-                                                    @RequestParam(required = false) Integer pageSize) {
+                                                    @RequestParam(required = false) Integer pageSize,
+                                                    @RequestParam(required = false, defaultValue = "createdAt") String sortBy,
+                                                    @RequestParam(required = false, defaultValue = "asc") String order) {
         int c = (current != null) ? current : (page != null ? page : 1);
         int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
-        return R.ok(approveService.getPending(userId, c, s));
+        return R.ok(approveService.getPending(userId, c, s, sortBy, order));
+    }
+
+    /**
+     * 统计 APPROVING（审批中）实例数（供 work-order-service 统计看板 Feign 调用）
+     */
+    @Operation(summary = "审批中实例数（供 Feign 调用）")
+    @GetMapping("/count/approving")
+    public R<Long> countApproving() {
+        return R.ok(approveService.countApproving());
     }
 
     /**

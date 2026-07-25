@@ -221,6 +221,8 @@ public class UserServiceImpl implements UserService {
         user.setDeptCode(dto.getDeptCode());
         user.setStatus("ENABLED");
         user.setLoginFail(0);
+        user.setCreatedAt(java.time.LocalDateTime.now());
+        user.setUpdatedAt(java.time.LocalDateTime.now());
         userMapper.insert(user);
 
         // 分配角色

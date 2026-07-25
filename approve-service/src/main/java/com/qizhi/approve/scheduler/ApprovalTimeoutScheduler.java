@@ -29,7 +29,7 @@ public class ApprovalTimeoutScheduler {
      * 发送督办通知给当前审批人和提交人。
      * </p>
      */
-    @Scheduled(cron = "0 */10 * * * ?")
+    @Scheduled(cron = "${approve.timeout.check-cron:0 */10 * * * ?}")
     public void checkTimeout() {
         log.debug("开始检测审批超时...");
         try {

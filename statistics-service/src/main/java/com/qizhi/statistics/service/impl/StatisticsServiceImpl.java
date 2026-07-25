@@ -117,6 +117,8 @@ public class StatisticsServiceImpl implements StatisticsService {
         dashboard.put("approvedCount", 0);
         dashboard.put("completedCount", 0);
         dashboard.put("rejectedCount", 0);
+        dashboard.put("timeoutCount", 0);
+        dashboard.put("avgApproveMinutes", 0);
         dashboard.put("deptDistribution", Collections.emptyList());
         dashboard.put("trend", Collections.emptyList());
         return dashboard;

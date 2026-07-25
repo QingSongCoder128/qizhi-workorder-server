@@ -50,6 +50,11 @@ public class RedisUtil {
         return redisTemplate.opsForValue().increment(key);
     }
 
+    /** INCRBY 按指定步长自增（key 不存在时初始化为 delta，用于序号计数器初始化） */
+    public Long incrementBy(String key, long delta) {
+        return redisTemplate.opsForValue().increment(key, delta);
+    }
+
     /**
      * 尝试获取分布式锁（SETNX）
      *

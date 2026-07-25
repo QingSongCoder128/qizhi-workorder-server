@@ -38,13 +38,13 @@ public class StatScheduler {
     private List<String> deptCodes;
 
     /** 工单类型列表，从 Nacos 读取，逗号分隔 */
-    @Value("${stats.work-types:REPAIR,PURCHASE,MAINTENANCE,OTHER}")
+    @Value("${stats.work-types:OPS_REPAIR,ADMIN_PURCHASE,HR_LEAVE,TECH_REQUEST}")
     private List<String> workTypes;
 
     /**
      * 每日凌晨 2:00 执行：汇总前一天的工单统计数据
      */
-    @Scheduled(cron = "0 0 2 * * ?")
+    @Scheduled(cron = "${stats.summary-cron:0 0 2 * * ?}")
     public void dailySummary() {
         LocalDate yesterday = LocalDate.now().minusDays(1);
         String dateStr = yesterday.format(DateTimeFormatter.ISO_LOCAL_DATE);

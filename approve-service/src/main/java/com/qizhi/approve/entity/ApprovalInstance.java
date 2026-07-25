@@ -34,6 +34,9 @@ public class ApprovalInstance {
 
     private String priority;
 
+    /** 工单类型 */
+    private String workType;
+
     private Integer totalNodes;
 
     private String currentNode;

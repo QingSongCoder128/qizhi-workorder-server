@@ -8,13 +8,17 @@ spring:
     gateway:
       discovery:
         locator:
+          # 开启服务发现路由: 自动为 Nacos 注册的服务创建路由
           enabled: true
+          # 服务ID转小写: 路由路径使用小写服务名（如 /user-service/**）
           lower-case-service-id: true
-      # 路由规则（后续迁移到 Nacos 配置中心）
+      # 手动路由规则（优先级高于自动发现路由）
+      # lb:// = Load Balanced，通过 Nacos 服务发现 + 负载均衡转发到对应微服务
       routes:
         - id: user-service
           uri: lb://user-service
           predicates:
+            # Path 断言: 匹配请求路径前缀，转发到 user-service
             - Path=/api/v1/auth/**,/api/v1/user/**,/api/v1/dept/**,/api/v1/role/**
         - id: work-order-service
           uri: lb://work-order-service
@@ -42,14 +46,17 @@ logging:
   level:
     com.qizhi: INFO
 
-# Actuator 运维监控配置
+# Actuator 运维监控端点
 management:
   endpoints:
     web:
       exposure:
+        # 暴露的端点: health=健康检查, info=服务信息, gateway=路由列表查看
         include: health,info,gateway
   endpoint:
     health:
+      # 显示健康检查详情（各组件 Redis/DB 连接状态）
       show-details: always
     gateway:
+      # 启用 /actuator/gateway/routes 端点，查看当前生效的路由规则
       enabled: true

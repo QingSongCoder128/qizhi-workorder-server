@@ -53,10 +53,16 @@
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
 
-        <!-- EasyExcel（Excel 导出�?-->
+        <!-- EasyExcel（Excel 导出�?-->
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>easyexcel</artifactId>
+        </dependency>
+        <!-- BUG-005 FIX: POI 5.2.5 needs commons-io 2.15+ -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.15.1</version>
         </dependency>
 
         <dependency>

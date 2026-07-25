@@ -1,6 +1,6 @@
 package com.qizhi.ai.agent;
 
-import com.qizhi.ai.client.DeepSeekClient;
+import com.qizhi.ai.client.AiModelClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -9,14 +9,14 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 
 /**
- * 预审 Agent - 调用 DeepSeek 校验内容完整性和合规性
+ * 预审 Agent - 调用 AI 大模型校验内容完整性和合规性
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class PreAuditAgent {
 
-    private final DeepSeekClient deepSeekClient;
+    private final AiModelClient aiModelClient;
 
     private static final String SYSTEM_PROMPT = """
             你是一个工单预审助手。请检查工单内容是否完整、合规。
@@ -32,7 +32,7 @@ public class PreAuditAgent {
 
         try {
             String userPrompt = String.format("工单标题: %s\n工单详情: %s", title, detail);
-            Map<String, Object> aiResult = deepSeekClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
+            Map<String, Object> aiResult = aiModelClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
 
             String suggestion = String.valueOf(aiResult.getOrDefault("suggestion", "内容完整，建议通过"));
             String sensitiveWords = String.valueOf(aiResult.getOrDefault("sensitiveWords", ""));
@@ -79,6 +79,7 @@ public class PreAuditAgent {
         result.put("sensitiveWords", found.isEmpty() ? "" : String.join(",", found));
         result.put("pass", issues.isEmpty());
         result.put("durationMs", System.currentTimeMillis() - start);
+        result.put("fallback", true);
         return result;
     }
 }

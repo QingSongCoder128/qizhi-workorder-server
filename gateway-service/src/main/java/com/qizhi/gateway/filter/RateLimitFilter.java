@@ -69,6 +69,14 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     @Value("#{'${gateway.white-list:/api/v1/auth/login,/api/v1/auth/register}'.split(',')}")
     private List<String> whiteList;
 
+    /** GW-10: 免限流白名单账号列表，Nacos: gateway.rate-limit.white-users */
+    @Value("#{'${gateway.rate-limit.white-users:}'.split(',')}")
+    private List<String> whiteUsers;
+
+    /** GW-10: 免限流白名单 IP 列表，Nacos: gateway.rate-limit.white-ips */
+    @Value("#{'${gateway.rate-limit.white-ips:}'.split(',')}")
+    private List<String> whiteIps;
+
     // ==================== Redis Key 前缀 ====================
 
     private static final String LIMIT_USER_PREFIX = "limit:user:";
@@ -85,8 +93,15 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
-        // ---- 第一步: IP 维度限流（所有请求都检查） ----
+        // ---- 第一步: GW-10 白名单 IP 跳过全部限流 ----
         String clientIp = getClientIp(request);
+        for (String wIp : whiteIps) {
+            if (!wIp.isBlank() && wIp.trim().equals(clientIp)) {
+                return chain.filter(exchange);
+            }
+        }
+
+        // ---- 第二步: IP 维度限流（所有请求都检查） ----
         String ipKey = LIMIT_IP_PREFIX + clientIp;
 
         return checkRateLimit(ipKey, ipQps)
@@ -96,15 +111,24 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
                         return writeTooManyResponse(exchange, "请求过于频繁，请稍后再试");
                     }
 
-                    // ---- 第二步: 白名单路径跳过用户维度限流 ----
+                    // ---- 第三步: 白名单路径跳过用户维度限流 ----
                     for (String white : whiteList) {
                         if (path.startsWith(white.trim())) {
                             return chain.filter(exchange);
                         }
                     }
 
-                    // ---- 第三步: 用户维度限流（仅已认证请求） ----
+                    // ---- 第四步: 用户维度限流（仅已认证请求） ----
                     String userId = request.getHeaders().getFirst("X-User-Id");
+
+                    // GW-10: 白名单账号跳过用户维度限流
+                    if (userId != null && !userId.isBlank()) {
+                        for (String wUser : whiteUsers) {
+                            if (!wUser.isBlank() && wUser.trim().equals(userId)) {
+                                return chain.filter(exchange);
+                            }
+                        }
+                    }
                     if (userId != null && !userId.isBlank()) {
                         String userKey = LIMIT_USER_PREFIX + userId;
 

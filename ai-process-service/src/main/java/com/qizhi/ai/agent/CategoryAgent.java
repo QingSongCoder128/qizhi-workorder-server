@@ -1,6 +1,6 @@
 package com.qizhi.ai.agent;
 
-import com.qizhi.ai.client.DeepSeekClient;
+import com.qizhi.ai.client.AiModelClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -9,14 +9,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 分类 Agent - 调用 DeepSeek 分析工单文本，识别归属部门
+ * 分类 Agent - 调用 AI 大模型分析工单文本，识别归属部门
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class CategoryAgent {
 
-    private final DeepSeekClient deepSeekClient;
+    private final AiModelClient aiModelClient;
 
     private static final String SYSTEM_PROMPT = """
             你是一个工单分类助手。根据工单的类型和内容，判断该工单应该归属哪个部门。
@@ -34,7 +34,7 @@ public class CategoryAgent {
 
         try {
             String userPrompt = String.format("工单类型: %s\n工单标题: %s\n工单详情: %s", type, title, detail);
-            Map<String, Object> aiResult = deepSeekClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
+            Map<String, Object> aiResult = aiModelClient.chatAsMap(SYSTEM_PROMPT, userPrompt);
 
             String category = String.valueOf(aiResult.getOrDefault("category", "DEPT_IT"));
             double confidence = aiResult.containsKey("confidence")
@@ -65,6 +65,7 @@ public class CategoryAgent {
         result.put("category", category);
         result.put("confidence", 0.6);
         result.put("durationMs", System.currentTimeMillis() - start);
+        result.put("fallback", true);
         return result;
     }
 }

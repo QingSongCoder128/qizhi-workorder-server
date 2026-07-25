@@ -13,4 +13,11 @@ public interface MessageFeignClient {
 
     @PostMapping("/send")
     R<Void> sendNotify(@RequestBody Object request);
+
+    /**
+     * 发送延迟督办消息（MS-04/MS-05）
+     * 工单进入待审批状态后触发，根据优先级设置不同延迟时长
+     */
+    @PostMapping("/send-delay-remind")
+    R<Void> sendDelayRemind(@RequestBody Object request);
 }

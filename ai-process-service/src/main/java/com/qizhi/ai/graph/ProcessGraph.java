@@ -92,6 +92,10 @@ public class ProcessGraph {
                 context.setCategory(String.valueOf(result.get("category")));
                 context.setConfidence(result.get("confidence") != null ?
                         ((Number) result.get("confidence")).doubleValue() : 0.8);
+                // BUG-003 FIX: 检测降级标记
+                if (Boolean.TRUE.equals(result.get("fallback"))) {
+                    context.setAiAbnormal(true);
+                }
 
                 long duration = System.currentTimeMillis() - start;
                 context.addResult(AgentResult.success(NODE_CATEGORY, result, duration));
@@ -131,6 +135,10 @@ public class ProcessGraph {
                 // 写入上下文
                 context.setPriority(String.valueOf(result.get("priority")));
                 context.setPriorityReason(String.valueOf(result.get("priorityReason")));
+                // BUG-003 FIX: 检测降级标记
+                if (Boolean.TRUE.equals(result.get("fallback"))) {
+                    context.setAiAbnormal(true);
+                }
 
                 long duration = System.currentTimeMillis() - start;
                 context.addResult(AgentResult.success(NODE_RATING, result, duration));
@@ -170,6 +178,10 @@ public class ProcessGraph {
                 context.setSuggestion(String.valueOf(result.get("suggestion")));
                 context.setSensitiveWords(String.valueOf(result.getOrDefault("sensitiveWords", "")));
                 context.setPass(result.get("pass") != null ? (Boolean) result.get("pass") : true);
+                // BUG-003 FIX: 检测降级标记
+                if (Boolean.TRUE.equals(result.get("fallback"))) {
+                    context.setAiAbnormal(true);
+                }
 
                 long duration = System.currentTimeMillis() - start;
                 context.addResult(AgentResult.success(NODE_PRE_AUDIT, result, duration));

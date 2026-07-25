@@ -44,6 +44,14 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             "/api/v1/auth/register"
     );
 
+    /**
+     * 管理端路径前缀（仅 ADMIN 角色可访问）
+     * SRS 需求: GW-14 解析会话中权限集合，拦截无权限接口访问
+     * 从 Nacos 读取，支持热更新
+     */
+    @Value("#{'${gateway.admin-paths:/api/v1/user/list,/api/v1/user/create,/api/v1/dept,/api/v1/role,/api/v1/approve/template,/api/v1/message/dlq,/api/v1/message/dead-letter,/api/v1/stats/refresh}'.split(',')}")
+    private List<String> adminPaths;
+
     /** 会话 Redis Key 前缀 */
     private static final String SESSION_PREFIX = "session:";
 
@@ -87,6 +95,12 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                         String username = String.valueOf(sessionData.getOrDefault("username", ""));
                         String role = String.valueOf(sessionData.getOrDefault("role", ""));
 
+                        // GW-14: 角色权限校验 — 员工禁止访问管理端接口
+                        if (isAdminPath(path) && !"ADMIN".equals(role)) {
+                            log.warn("权限不足，拦截请求: role={}, path={}", role, path);
+                            return writeForbiddenResponse(exchange, "无权限访问管理端接口");
+                        }
+
                         // 构建新请求，注入用户信息到请求头
                         ServerHttpRequest newRequest = exchange.getRequest().mutate()
                                 .header("X-User-Id", userId)
@@ -109,6 +123,40 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                     log.warn("Session 已过期或不存在: {}, Redis返回empty", sessionId);
                     return writeUnauthorizedResponse(exchange, "未登录，请重新登录");
                 }));
+    }
+
+    /**
+     * 判断请求路径是否为管理端接口
+     */
+    private boolean isAdminPath(String path) {
+        for (String adminPath : adminPaths) {
+            if (path.startsWith(adminPath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 返回 403 无权限 JSON 响应
+     */
+    private Mono<Void> writeForbiddenResponse(ServerWebExchange exchange, String message) {
+        ServerHttpResponse response = exchange.getResponse();
+        if (response.isCommitted()) {
+            return Mono.empty();
+        }
+        response.setStatusCode(HttpStatus.FORBIDDEN);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+
+        R<Void> result = R.forbidden(message);
+        try {
+            byte[] bytes = objectMapper.writeValueAsBytes(result);
+            DataBufferFactory bufferFactory = response.bufferFactory();
+            return response.writeWith(Mono.just(bufferFactory.wrap(bytes)));
+        } catch (JsonProcessingException e) {
+            log.error("序列化响应失败", e);
+            return response.setComplete();
+        }
     }
 
     /**

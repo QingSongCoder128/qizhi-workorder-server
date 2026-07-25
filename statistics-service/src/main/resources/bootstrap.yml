@@ -1,13 +1,20 @@
+# ===================================================================
+# Nacos 启动引导配置（优先于 application.yml 加载）
+# ===================================================================
 spring:
   cloud:
     nacos:
+      # 服务注册与发现: 将本服务注册到 Nacos，供网关和其他服务发现调用
       discovery:
         server-addr: 192.168.120.128:8848
         namespace:
+      # 配置中心: 从 Nacos 拉取远程配置（支持热更新 @RefreshScope）
       config:
         server-addr: 192.168.120.128:8848
+        # 配置文件格式: Nacos 中 Data ID 后缀为 .yaml
         file-extension: yaml
         namespace:
   config:
     import:
+      # 导入 Nacos 配置: optional 前缀表示 Nacos 不可用时不阻断启动
       - optional:nacos:statistics-service.yaml
