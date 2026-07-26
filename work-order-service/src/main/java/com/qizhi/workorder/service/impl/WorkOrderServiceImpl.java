@@ -106,7 +106,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private List<String> allowedAttachmentExtensions;
 
     /** 工单服务模块内附件目录。 */
-    @Value("${storage.attachment.root:uploads/work-order}")
+    @Value("${storage.attachment.root:work-order-service/uploads/work-order}")
     private String attachmentStorageRoot;
 
     /** 超时阈值-加急（分钟），从 Nacos 读取，默认 60 */
@@ -384,8 +384,19 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     public PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String keyword) {
         Page<WorkOrder> page = new Page<>(current, size);
         LambdaQueryWrapper<WorkOrder> wrapper = new LambdaQueryWrapper<>();
-        if (StringUtils.hasText(status)) {
-            wrapper.eq(WorkOrder::getStatus, status);
+        if ("TIMEOUT".equals(status)) {
+            // 特殊筛选：仅查询当前超时的工单（待审批/审批中 且超过对应优先级阈值）
+            wrapper.in(WorkOrder::getStatus, Arrays.asList("PENDING_APPROVE", "APPROVING"))
+                    .apply("TIMESTAMPDIFF(MINUTE, created_at, NOW()) > CASE priority" +
+                            " WHEN 'URGENT' THEN " + timeoutUrgentMinutes +
+                            " WHEN 'LOW' THEN " + timeoutLowMinutes +
+                            " ELSE " + timeoutNormalMinutes + " END");
+        } else if (StringUtils.hasText(status)) {
+            if (status.contains(",")) {
+                wrapper.in(WorkOrder::getStatus, Arrays.asList(status.split(",")));
+            } else {
+                wrapper.eq(WorkOrder::getStatus, status);
+            }
         }
         if (StringUtils.hasText(type)) {
             wrapper.eq(WorkOrder::getType, type);

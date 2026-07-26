@@ -50,7 +50,7 @@ public class DemoAttachmentInitializer implements ApplicationRunner {
         DEMO_FILES.put("visitor_machine.jpg", "访客机触摸屏故障");
     }
 
-    @Value("${storage.attachment.root:uploads/work-order}")
+    @Value("${storage.attachment.root:work-order-service/uploads/work-order}")
     private String attachmentStorageRoot;
 
     @Value("${demo.attachments.initialize:false}")

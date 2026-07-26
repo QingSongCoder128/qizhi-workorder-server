@@ -39,7 +39,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 白名单路径（无需鉴权），由 Nacos 管理 */
-    @Value("#{'${gateway.auth-white-list:/api/v1/auth/login,/api/v1/user/avatar}'.split(',')}")
+    @Value("#{'${gateway.auth-white-list:/api/v1/auth/login,/api/v1/auth/logout,/api/v1/user/avatar}'.split(',')}")
     private List<String> authWhiteList;
 
     /** 可动态屏蔽的高危路径 */

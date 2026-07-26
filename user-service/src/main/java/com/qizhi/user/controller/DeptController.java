@@ -46,6 +46,13 @@ public class DeptController {
     @Operation(summary = "新增部门")
     @PostMapping
     public R<Void> add(@RequestBody SysDepartment dept) {
+        // 自动生成部门编码（后端逻辑字段，无需用户填写）
+        if (dept.getDeptCode() == null || dept.getDeptCode().isBlank()) {
+            dept.setDeptCode("DEPT_" + System.currentTimeMillis());
+        }
+        if (dept.getParentId() == null) {
+            dept.setParentId(0L);
+        }
         departmentMapper.insert(dept);
         return R.ok();
     }

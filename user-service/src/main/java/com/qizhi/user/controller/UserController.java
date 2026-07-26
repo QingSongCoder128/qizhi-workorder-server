@@ -36,7 +36,7 @@ public class UserController {
     private final UserService userService;
     private final SysUserMapper userMapper;
 
-    @Value("${storage.avatar.root:uploads/avatar}")
+    @Value("${storage.avatar.root:user-service/uploads/avatar}")
     private String avatarStorageRoot;
 
     @Operation(summary = "获取当前用户信息")
