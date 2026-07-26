@@ -87,10 +87,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     @Override
     public void refreshCache() {
-        List<String> deptCodes = List.of("ALL", "DEPT_IT", "DEPT_ADMIN", "DEPT_HR", "DEPT_TECH", "DEPT_FIN");
-        for (String dept : deptCodes) {
-            redisUtil.delete(CommonConstants.STATS_DASHBOARD_PREFIX + dept);
-        }
+        redisUtil.deleteByPattern(CommonConstants.STATS_DASHBOARD_PREFIX + "*");
         log.info("统计缓存已清除");
     }
 

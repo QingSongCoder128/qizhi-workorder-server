@@ -13,10 +13,12 @@ import com.qizhi.user.entity.SysDepartment;
 import com.qizhi.user.entity.SysRole;
 import com.qizhi.user.entity.SysUser;
 import com.qizhi.user.entity.SysUserRole;
+import com.qizhi.user.entity.SysRolePermission;
 import com.qizhi.user.mapper.SysDepartmentMapper;
 import com.qizhi.user.mapper.SysRoleMapper;
 import com.qizhi.user.mapper.SysUserMapper;
 import com.qizhi.user.mapper.SysUserRoleMapper;
+import com.qizhi.user.mapper.SysRolePermissionMapper;
 import com.qizhi.user.service.UserService;
 import com.qizhi.user.util.PasswordValidator;
 import com.qizhi.user.vo.LoginVO;
@@ -44,6 +46,7 @@ public class UserServiceImpl implements UserService {
     private final SysUserMapper userMapper;
     private final SysRoleMapper roleMapper;
     private final SysUserRoleMapper userRoleMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
     private final SysDepartmentMapper departmentMapper;
     private final RedisUtil redisUtil;
 
@@ -70,7 +73,10 @@ public class UserServiceImpl implements UserService {
     private String defaultPassword;
 
     @Override
-    public LoginVO login(LoginDTO dto) {
+    // Authentication failures are business outcomes: their counters and lock
+    // timestamps must commit even though the method returns a BusinessException.
+    @Transactional(rollbackFor = Exception.class, noRollbackFor = BusinessException.class)
+    public synchronized LoginVO login(LoginDTO dto) {
         // 查询用户
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
@@ -83,13 +89,23 @@ public class UserServiceImpl implements UserService {
                 && user.getLockTime().isAfter(LocalDateTime.now())) {
             throw new BusinessException(403, "账号已锁定，请" + loginLockMinutes + "分钟后重试");
         }
+        if ("LOCKED".equals(user.getStatus())
+                && (user.getLockTime() == null || !user.getLockTime().isAfter(LocalDateTime.now()))) {
+            user.setStatus("ENABLED");
+            user.setLoginFail(0);
+            user.setLockTime(null);
+            userMapper.updateById(user);
+        }
 
         // 密码校验
         if (!BCrypt.matches(dto.getPassword(), user.getPassword())) {
             // 登录失败计数
             int failCount = (user.getLoginFail() == null ? 0 : user.getLoginFail()) + 1;
             user.setLoginFail(failCount);
-            if (failCount >= loginLockCount) {
+            // Five failures is the security ceiling required by the SRS.
+            // Runtime configuration may tighten it, but must never weaken it.
+            int effectiveLockCount = Math.min(Math.max(loginLockCount, 1), 5);
+            if (failCount >= effectiveLockCount) {
                 user.setStatus("LOCKED");
                 user.setLockTime(LocalDateTime.now().plusMinutes(loginLockMinutes));
             }
@@ -112,6 +128,7 @@ public class UserServiceImpl implements UserService {
 
         // 查询角色
         String roleCode = getRoleCode(user.getId());
+        List<String> permissions = getPermissions(user.getId());
 
         // 生成 sessionId 并存入 Redis
         String sessionId = UUID.randomUUID().toString().replace("-", "");
@@ -137,6 +154,7 @@ public class UserServiceImpl implements UserService {
         sessionData.put("role", roleCode);
         sessionData.put("realName", user.getRealName());
         sessionData.put("deptCode", user.getDeptCode());
+        sessionData.put("permissions", permissions);
         redisUtil.set(CommonConstants.SESSION_PREFIX + sessionId, sessionData,
                 sessionExpireMinutes, TimeUnit.MINUTES);
 
@@ -151,6 +169,7 @@ public class UserServiceImpl implements UserService {
                 .phone(user.getPhone())
                 .email(user.getEmail())
                 .avatarUrl(user.getAvatarUrl())
+                .permissions(permissions)
                 .build();
     }
 
@@ -394,6 +413,7 @@ public class UserServiceImpl implements UserService {
         // 填充角色信息
         String roleCode = getRoleCode(user.getId());
         vo.setRoleCode(roleCode);
+        vo.setPermissions(getPermissions(user.getId()));
         SysRole role = roleMapper.selectOne(
                 new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, roleCode));
         if (role != null) {
@@ -431,5 +451,19 @@ public class UserServiceImpl implements UserService {
                         .in(SysUser::getId, userIds)
                         .eq(SysUser::getStatus, "ENABLED"));
         return users.stream().map(this::toUserVO).collect(Collectors.toList());
+    }
+
+    private List<String> getPermissions(Long userId) {
+        List<SysUserRole> userRoles = userRoleMapper.selectList(
+                new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, userId));
+        if (userRoles.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> roleIds = userRoles.stream().map(SysUserRole::getRoleId).toList();
+        return rolePermissionMapper.selectList(
+                        new LambdaQueryWrapper<SysRolePermission>()
+                                .in(SysRolePermission::getRoleId, roleIds))
+                .stream().map(SysRolePermission::getPermissionCode)
+                .distinct().sorted().toList();
     }
 }

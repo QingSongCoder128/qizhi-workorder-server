@@ -65,7 +65,8 @@ public class RemindConsumer {
             log.info("消费延迟督办消息: {}", msgMap);
 
             // 验证消息体
-            if (msgMap == null || msgMap.get("workOrderId") == null) {
+            if (msgMap == null || msgMap.get("workOrderId") == null
+                    || msgMap.get("delayedTaskId") == null) {
                 log.warn("督办消息格式无效，跳过: {}", msgMap);
                 channel.basicAck(deliveryTag, false);
                 return;
@@ -76,7 +77,9 @@ public class RemindConsumer {
                     Long.valueOf(String.valueOf(msgMap.get("delayedTaskId"))) : null;
 
             // 1. Feign 查询工单当前状态
-            String currentStatus = queryWorkOrderStatus(workOrderId);
+            Map<String, Object> workOrderStatus = queryWorkOrderStatus(workOrderId);
+            String currentStatus = workOrderStatus == null ? null
+                    : String.valueOf(workOrderStatus.get("status"));
             if (currentStatus == null) {
                 log.warn("工单不存在或查询失败: workOrderId={}", workOrderId);
                 channel.basicAck(deliveryTag, false);
@@ -98,6 +101,13 @@ public class RemindConsumer {
             String orderNo = msgMap.get("orderNo") != null ? String.valueOf(msgMap.get("orderNo")) : "未知";
             Long approverId = msgMap.get("approverId") != null ?
                     Long.valueOf(String.valueOf(msgMap.get("approverId"))) : null;
+            Object currentApprover = workOrderStatus.get("currentApproverId");
+            if (currentApprover != null && approverId != null
+                    && !String.valueOf(approverId).equals(String.valueOf(currentApprover))) {
+                cancelDelayedTask(delayedTaskId);
+                channel.basicAck(deliveryTag, false);
+                return;
+            }
 
             if (approverId != null) {
                 SysMessage sysMsg = new SysMessage();
@@ -107,8 +117,12 @@ public class RemindConsumer {
                 sysMsg.setMsgType("DELAY_REMIND");
                 sysMsg.setBizType("WORK_ORDER");
                 sysMsg.setBizId(workOrderId);
+                sysMsg.setMessageKey("REMIND:" + delayedTaskId + ":" + (remindCount(delayedTaskId) + 1));
                 sysMsg.setIsRead(false);
-                messageMapper.insert(sysMsg);
+                if (messageMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysMessage>()
+                        .eq(SysMessage::getMessageKey, sysMsg.getMessageKey())) == 0) {
+                    messageMapper.insert(sysMsg);
+                }
                 log.info("督办站内信已发送: approverId={}, workOrderId={}", approverId, workOrderId);
             }
 
@@ -144,8 +158,11 @@ public class RemindConsumer {
                 log.info("督办已安排下次提醒: workOrderId={}, remindCount={}/{}", workOrderId, remindCount, maxRemind);
             } else {
                 // 督办次数用尽，发送升级通知给提交人
-                Long submitterId = msgMap.get("submitterId") != null ?
-                        Long.valueOf(String.valueOf(msgMap.get("submitterId"))) : null;
+                Object submitterValue = msgMap.get("submitterId") != null
+                        ? msgMap.get("submitterId")
+                        : workOrderStatus.get("submitterId");
+                Long submitterId = submitterValue != null
+                        ? Long.valueOf(String.valueOf(submitterValue)) : null;
                 if (submitterId != null) {
                     SysMessage escalationMsg = new SysMessage();
                     escalationMsg.setReceiverId(submitterId);
@@ -154,8 +171,12 @@ public class RemindConsumer {
                     escalationMsg.setMsgType("ESCALATION");
                     escalationMsg.setBizType("WORK_ORDER");
                     escalationMsg.setBizId(workOrderId);
+                    escalationMsg.setMessageKey("ESCALATION:" + delayedTaskId);
                     escalationMsg.setIsRead(false);
-                    messageMapper.insert(escalationMsg);
+                    if (messageMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysMessage>()
+                            .eq(SysMessage::getMessageKey, escalationMsg.getMessageKey())) == 0) {
+                        messageMapper.insert(escalationMsg);
+                    }
                 }
                 log.warn("督办次数用尽，已升级: workOrderId={}, remindCount={}", workOrderId, remindCount);
             }
@@ -174,16 +195,21 @@ public class RemindConsumer {
     /**
      * 查询工单当前状态（Feign 调用 work-order-service）
      */
-    private String queryWorkOrderStatus(Long workOrderId) {
+    private Map<String, Object> queryWorkOrderStatus(Long workOrderId) {
         try {
             R<Map<String, Object>> result = workOrderFeignClient.getStatus(workOrderId);
             if (result != null && result.getCode() == 200 && result.getData() != null) {
-                return String.valueOf(result.getData().get("status"));
+                return result.getData();
             }
         } catch (Exception e) {
             log.error("查询工单状态失败: workOrderId={}, error={}", workOrderId, e.getMessage());
         }
         return null;
+    }
+
+    private int remindCount(Long delayedTaskId) {
+        DelayedTask task = delayedTaskMapper.selectById(delayedTaskId);
+        return task == null || task.getRemindCount() == null ? 0 : task.getRemindCount();
     }
 
     /**

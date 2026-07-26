@@ -34,6 +34,10 @@ public class MessageProducer {
         sendPersistent(REMIND_DELAY_EXCHANGE, "remind.delay.retry", message, "重复督办");
     }
 
+    public void sendReminderNow(Object message) {
+        sendPersistent("remind.fire.exchange", "remind.fire", message, "人工督办");
+    }
+
     private void sendPersistent(String exchange, String routingKey, Object payload, String type) {
         String messageId = UUID.randomUUID().toString();
         rabbitTemplate.convertAndSend(exchange, routingKey, payload, amqpMessage -> {

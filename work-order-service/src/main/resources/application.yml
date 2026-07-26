@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: work-order-service
+  datasource:
+    hikari:
+      maximum-pool-size: 40
+      minimum-idle: 10
+      connection-timeout: 3000
   cloud:
     openfeign:
       client:

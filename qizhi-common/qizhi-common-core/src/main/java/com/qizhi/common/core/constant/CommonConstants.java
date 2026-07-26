@@ -38,6 +38,21 @@ public final class CommonConstants {
     /** 用户角色（网关注入） */
     public static final String HEADER_USER_ROLE = "X-User-Role";
 
+    /** 内部调用方 */
+    public static final String HEADER_INTERNAL_CALLER = "X-Internal-Caller";
+
+    /** 内部调用时间戳 */
+    public static final String HEADER_INTERNAL_TIMESTAMP = "X-Internal-Timestamp";
+
+    /** 内部调用一次性随机数 */
+    public static final String HEADER_INTERNAL_NONCE = "X-Internal-Nonce";
+
+    /** 签名绑定的微服务实际路径 */
+    public static final String HEADER_INTERNAL_PATH = "X-Internal-Path";
+
+    /** 内部调用 HMAC 签名 */
+    public static final String HEADER_INTERNAL_SIGNATURE = "X-Internal-Signature";
+
     // ========== 工单状态 ==========
 
     public static final String STATUS_PENDING_AI = "PENDING_AI";

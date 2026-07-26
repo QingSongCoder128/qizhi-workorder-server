@@ -2,6 +2,8 @@ package com.qizhi.ai.supervisor;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import com.qizhi.ai.config.AiRuntimeConfigService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.stereotype.Component;
 
@@ -18,15 +20,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Component
-@RefreshScope
+@RequiredArgsConstructor
 public class AiSupervisor {
 
     /** 当前运行中的 AI 任务数 */
     private final AtomicInteger runningTasks = new AtomicInteger(0);
 
     /** 最大并发数（Nacos 配置，默认 5） */
-    @Value("${ai.supervisor.max-concurrent:5}")
-    private int maxConcurrent;
+    private final AiRuntimeConfigService runtimeConfigService;
 
     /**
      * 尝试获取执行许可
@@ -36,6 +37,7 @@ public class AiSupervisor {
     public boolean tryAcquire() {
         while (true) {
             int current = runningTasks.get();
+            int maxConcurrent = getMaxConcurrent();
             if (current >= maxConcurrent) {
                 log.warn("AI并发已满: running={}, max={}, 任务将排队", current, maxConcurrent);
                 return false;
@@ -52,7 +54,7 @@ public class AiSupervisor {
      */
     public void release() {
         int after = runningTasks.updateAndGet(current -> Math.max(0, current - 1));
-        log.debug("AI任务许可释放: running={}/{}", after, maxConcurrent);
+        log.debug("AI任务许可释放: running={}/{}", after, getMaxConcurrent());
     }
 
     /**
@@ -66,6 +68,6 @@ public class AiSupervisor {
      * 获取最大并发数
      */
     public int getMaxConcurrent() {
-        return maxConcurrent;
+        return runtimeConfigService.get().maxConcurrent();
     }
 }

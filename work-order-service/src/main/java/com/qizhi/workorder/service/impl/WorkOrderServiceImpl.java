@@ -8,6 +8,7 @@ import com.qizhi.common.core.result.PageResult;
 import com.qizhi.common.core.result.R;
 import com.qizhi.common.redis.util.RedisUtil;
 import com.qizhi.workorder.dto.WorkOrderSubmitDTO;
+import com.qizhi.workorder.domain.WorkOrderStateMachine;
 import com.qizhi.workorder.entity.WorkOrder;
 import com.qizhi.workorder.entity.WorkOrderAttachment;
 import com.qizhi.workorder.entity.WorkOrderHistory;
@@ -37,6 +38,8 @@ import java.util.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +59,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @RefreshScope
 public class WorkOrderServiceImpl implements WorkOrderService {
+
+    /**
+     * Admission control for the short Seata approval phase. Waiting happens
+     * before entering the proxied global transaction, so queued requests hold
+     * neither an XID nor a database connection.
+     */
+    private static final Semaphore APPROVAL_PHASE_SLOTS = new Semaphore(16, true);
 
     private final WorkOrderMapper workOrderMapper;
     private final WorkOrderHistoryMapper historyMapper;
@@ -137,13 +147,14 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         // ---- 第三阶段: Seata 分布式事务（更新状态 + 创建审批单，跨服务原子操作） ----
         // 通过 self 代理调用，确保 @GlobalTransactional 注解生效
-        self.updateStatusAndCreateApproval(order, userId, username);
+        completeApprovalStage(order, userId, username);
 
         // ---- 第四阶段: 异步通知（事务外执行，失败不影响主流程） ----
         sendSubmitNotification(order, userId);
 
         // ---- 第五阶段: 触发延迟督办（MS-04/MS-05，根据优先级设置不同延迟时长） ----
         sendDelayRemind(order);
+        invalidateStatsCache();
 
         // 注意: 不主动释放锁，让其自然过期（30秒），防止短时间内重复提交同类工单
         return order;
@@ -480,7 +491,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         processAI(order);
 
         // Seata 分布式事务：更新状态为待审批 + 创建新审批单
-        self.updateStatusAndCreateApproval(order, userId, username);
+        completeApprovalStage(order, userId, username);
+        invalidateStatsCache();
     }
 
     @Override
@@ -673,6 +685,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setStatus("CANCELLED");
         workOrderMapper.updateById(order);
         saveHistory(id, "PENDING_APPROVE", "CANCELLED", userId, order.getSubmitterName(), "用户撤销工单");
+        invalidateStatsCache();
     }
 
     /**
@@ -686,6 +699,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException("工单不存在");
         }
         String fromStatus = order.getStatus();
+        try {
+            WorkOrderStateMachine.requireTransition(fromStatus, status);
+        } catch (IllegalStateException e) {
+            throw new BusinessException(409, "非法工单状态流转: " + fromStatus + " -> " + status);
+        }
         order.setStatus(status);
         if ("COMPLETED".equals(status)) {
             order.setCompletedAt(LocalDateTime.now());
@@ -703,10 +721,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      */
     private void invalidateStatsCache() {
         try {
-            String[] deptCodes = {"ALL", "DEPT_IT", "DEPT_ADMIN", "DEPT_HR", "DEPT_TECH", "DEPT_FIN"};
-            for (String dept : deptCodes) {
-                redisUtil.delete(CommonConstants.STATS_DASHBOARD_PREFIX + dept);
-            }
+            redisUtil.deleteByPattern(CommonConstants.STATS_DASHBOARD_PREFIX + "*");
             log.debug("统计缓存已失效");
         } catch (Exception e) {
             log.warn("统计缓存失效失败（不影响主流程）: {}", e.getMessage());
@@ -739,6 +754,24 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         } catch (Exception e) {
             log.error("附件上传失败: {}", e.getMessage(), e);
             throw new BusinessException("附件上传失败");
+        }
+    }
+
+    private void completeApprovalStage(WorkOrder order, Long userId, String username) {
+        boolean acquired = false;
+        try {
+            acquired = APPROVAL_PHASE_SLOTS.tryAcquire(30, TimeUnit.SECONDS);
+            if (!acquired) {
+                throw new BusinessException("审批链路繁忙，请稍后重试");
+            }
+            self.updateStatusAndCreateApproval(order, userId, username);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("审批链路处理中断，请稍后重试");
+        } finally {
+            if (acquired) {
+                APPROVAL_PHASE_SLOTS.release();
+            }
         }
     }
 

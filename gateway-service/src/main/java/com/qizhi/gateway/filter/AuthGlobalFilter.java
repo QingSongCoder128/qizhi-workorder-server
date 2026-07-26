@@ -107,10 +107,10 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                         String username = String.valueOf(sessionData.getOrDefault("username", ""));
                         String role = String.valueOf(sessionData.getOrDefault("role", ""));
 
-                        // GW-14: 角色权限校验 — 员工禁止访问管理端接口
-                        if (isAdminPath(path) && !"ADMIN".equals(role)) {
-                            log.warn("权限不足，拦截请求: role={}, path={}", role, path);
-                            return writeForbiddenResponse(exchange, "无权限访问管理端接口");
+                        // 统一角色命名空间，旧公共业务路径不再对外暴露。
+                        if (!isRolePathAllowed(path, role)) {
+                            log.warn("角色路径越权，拦截请求: role={}, path={}", role, path);
+                            return writeForbiddenResponse(exchange, "当前角色无权访问该接口");
                         }
 
                         // 构建新请求，注入用户信息到请求头
@@ -149,6 +149,20 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             }
         }
         return false;
+    }
+
+    private boolean isRolePathAllowed(String path, String role) {
+        if (path.startsWith("/api/v1/employee/")) {
+            return "EMPLOYEE".equals(role) || "APPROVER".equals(role) || "ADMIN".equals(role);
+        }
+        if (path.startsWith("/api/v1/approver/")) {
+            return "APPROVER".equals(role) || "ADMIN".equals(role);
+        }
+        if (path.startsWith("/api/v1/admin/")) {
+            return "ADMIN".equals(role);
+        }
+        // 登录后只允许角色命名空间；头像读取由白名单提前放行。
+        return !path.startsWith("/api/v1/");
     }
 
     /**

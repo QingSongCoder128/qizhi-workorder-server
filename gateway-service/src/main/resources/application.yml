@@ -15,32 +15,137 @@ spring:
       # 手动路由规则（优先级高于自动发现路由）
       # lb:// = Load Balanced，通过 Nacos 服务发现 + 负载均衡转发到对应微服务
       routes:
-        - id: user-service
+        - id: auth-service
           uri: lb://user-service
           predicates:
-            # Path 断言: 匹配请求路径前缀，转发到 user-service
-            - Path=/api/v1/auth/**,/api/v1/user/**,/api/v1/dept/**,/api/v1/role/**
-        - id: work-order-service
+            - Path=/api/v1/auth/**,/api/v1/user/avatar/**
+        - id: employee-user
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/employee/user/**
+          filters:
+            - RewritePath=/api/v1/employee/user(?<segment>/?.*), /api/v1/user$\{segment}
+        - id: employee-departments
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/employee/departments/**
+          filters:
+            - RewritePath=/api/v1/employee/departments(?<segment>/?.*), /api/v1/dept$\{segment}
+        - id: employee-workorders
           uri: lb://work-order-service
           predicates:
-            - Path=/api/v1/workorder/**
-        - id: approve-service
-          uri: lb://approve-service
-          predicates:
-            - Path=/api/v1/approve/**
-        - id: message-service
+            - Path=/api/v1/employee/workorders/**
+          filters:
+            - RewritePath=/api/v1/employee/workorders(?<segment>/?.*), /api/v1/workorder$\{segment}
+        - id: employee-messages
           uri: lb://message-service
           predicates:
-            - Path=/api/v1/message/**
-        - id: ai-process-service
-          uri: lb://ai-process-service
+            - Path=/api/v1/employee/messages/**
+          filters:
+            - RewritePath=/api/v1/employee/messages(?<segment>/?.*), /api/v1/message$\{segment}
+        - id: employee-approvals
+          uri: lb://approve-service
           predicates:
-            - Path=/api/v1/ai/**
-        - id: statistics-service
+            - Path=/api/v1/employee/approvals/**
+            - Method=GET
+          filters:
+            - RewritePath=/api/v1/employee/approvals(?<segment>/?.*), /api/v1/approve$\{segment}
+        - id: approver-approvals
+          uri: lb://approve-service
+          predicates:
+            - Path=/api/v1/approver/approvals/**
+          filters:
+            - RewritePath=/api/v1/approver/approvals(?<segment>/?.*), /api/v1/approve$\{segment}
+        - id: approver-user
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/approver/user/**
+          filters:
+            - RewritePath=/api/v1/approver/user(?<segment>/?.*), /api/v1/user$\{segment}
+        - id: approver-workorders
+          uri: lb://work-order-service
+          predicates:
+            - Path=/api/v1/approver/workorders/**
+          filters:
+            - RewritePath=/api/v1/approver/workorders(?<segment>/?.*), /api/v1/workorder$\{segment}
+        - id: approver-messages
+          uri: lb://message-service
+          predicates:
+            - Path=/api/v1/approver/messages/**
+          filters:
+            - RewritePath=/api/v1/approver/messages(?<segment>/?.*), /api/v1/message$\{segment}
+        - id: admin-users
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/admin/users/**
+          filters:
+            - RewritePath=/api/v1/admin/users(?<segment>/?.*), /api/v1/user$\{segment}
+        - id: admin-departments
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/admin/departments/**
+          filters:
+            - RewritePath=/api/v1/admin/departments(?<segment>/?.*), /api/v1/dept$\{segment}
+        - id: admin-roles
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/admin/roles/**
+          filters:
+            - RewritePath=/api/v1/admin/roles(?<segment>/?.*), /api/v1/role$\{segment}
+        - id: admin-workorders
+          uri: lb://work-order-service
+          predicates:
+            - Path=/api/v1/admin/workorders/**
+          filters:
+            - RewritePath=/api/v1/admin/workorders(?<segment>/?.*), /api/v1/workorder$\{segment}
+        - id: admin-approvals
+          uri: lb://approve-service
+          predicates:
+            - Path=/api/v1/admin/approvals/**
+          filters:
+            - RewritePath=/api/v1/admin/approvals(?<segment>/?.*), /api/v1/approve$\{segment}
+        - id: admin-approval-templates
+          uri: lb://approve-service
+          predicates:
+            - Path=/api/v1/admin/approval-templates/**
+          filters:
+            - RewritePath=/api/v1/admin/approval-templates(?<segment>/?.*), /api/v1/approve/template$\{segment}
+        - id: admin-messages
+          uri: lb://message-service
+          predicates:
+            - Path=/api/v1/admin/messages/**
+          filters:
+            - RewritePath=/api/v1/admin/messages(?<segment>/?.*), /api/v1/message$\{segment}
+        - id: admin-dead-letters
+          uri: lb://message-service
+          predicates:
+            - Path=/api/v1/admin/dead-letters/**
+          filters:
+            - RewritePath=/api/v1/admin/dead-letters(?<segment>/?.*), /api/v1/message/dead-letter$\{segment}
+        - id: admin-reminders
+          uri: lb://message-service
+          predicates:
+            - Path=/api/v1/admin/reminders/**
+          filters:
+            - RewritePath=/api/v1/admin/reminders(?<segment>/?.*), /api/v1/message/reminder$\{segment}
+        - id: admin-stats
           uri: lb://statistics-service
           predicates:
-            - Path=/api/v1/stats/**
-
+            - Path=/api/v1/admin/stats/**
+          filters:
+            - RewritePath=/api/v1/admin/stats(?<segment>/?.*), /api/v1/stats$\{segment}
+        - id: admin-ai
+          uri: lb://ai-process-service
+          predicates:
+            - Path=/api/v1/admin/ai/**
+          filters:
+            - RewritePath=/api/v1/admin/ai(?<segment>/?.*), /api/v1/ai$\{segment}
+        - id: admin-ai-config
+          uri: lb://ai-process-service
+          predicates:
+            - Path=/api/v1/admin/config/ai/**
+          filters:
+            - RewritePath=/api/v1/admin/config/ai(?<segment>/?.*), /api/v1/ai/config$\{segment}
 # 日志级别
 logging:
   level:

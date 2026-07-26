@@ -6,8 +6,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qizhi.common.core.result.PageResult;
 import com.qizhi.common.core.result.R;
 import com.qizhi.message.entity.DeadLetter;
+import com.qizhi.message.entity.DelayedTask;
 import com.qizhi.message.entity.SysMessage;
 import com.qizhi.message.mapper.DeadLetterMapper;
+import com.qizhi.message.mapper.DelayedTaskMapper;
 import com.qizhi.message.mapper.SysMessageMapper;
 import com.qizhi.message.producer.MessageProducer;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,7 +20,11 @@ import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Tag(name = "消息管理")
 @RestController
@@ -30,10 +36,15 @@ public class MessageController {
     private final MessageProducer messageProducer;
     private final SysMessageMapper messageMapper;
     private final DeadLetterMapper deadLetterMapper;
+    private final DelayedTaskMapper delayedTaskMapper;
+    private final ObjectMapper objectMapper;
 
     /** 死信队列最大重试次数，超过则标记为需人工介入，Nacos: remind.dlq-max-retry */
     @Value("${remind.dlq-max-retry:3}")
     private int dlqMaxRetry;
+
+    @Value("${remind.max-count:3}")
+    private int maxRemindCount;
 
     @Operation(summary = "发送通知（供 Feign 调用）")
     @PostMapping("/send")
@@ -53,8 +64,52 @@ public class MessageController {
     @PostMapping("/send-delay-remind")
     public R<Void> sendDelayRemind(@RequestBody Map<String, Object> request) {
         String priority = request.get("priority") != null ? String.valueOf(request.get("priority")) : "NORMAL";
+        Long workOrderId = Long.valueOf(String.valueOf(request.get("workOrderId")));
+        Long approverId = Long.valueOf(String.valueOf(request.get("approverId")));
+        DelayedTask task = delayedTaskMapper.selectOne(new LambdaQueryWrapper<DelayedTask>()
+                .eq(DelayedTask::getWorkOrderId, workOrderId)
+                .eq(DelayedTask::getApproverId, approverId)
+                .eq(DelayedTask::getStatus, "PENDING")
+                .last("LIMIT 1"));
+        if (task == null) {
+            task = new DelayedTask();
+            task.setWorkOrderId(workOrderId);
+            task.setOrderNo(String.valueOf(request.get("orderNo")));
+            task.setApproverId(approverId);
+            task.setPriority(priority);
+            int delayMinutes = switch (priority.toUpperCase()) {
+                case "URGENT" -> 60;
+                case "LOW" -> 720;
+                default -> 240;
+            };
+            task.setDelayMinutes(delayMinutes);
+            task.setRemindCount(0);
+            task.setMaxRemind(maxRemindCount);
+            task.setEscalationLevel(0);
+            task.setStatus("PENDING");
+            task.setFireAt(LocalDateTime.now().plusMinutes(delayMinutes));
+            delayedTaskMapper.insert(task);
+        }
+        request.put("delayedTaskId", task.getId());
         messageProducer.sendDelayRemind(request, priority);
         return R.ok();
+    }
+
+    @PostMapping("/reminder/scan")
+    public R<Map<String, Object>> scanDueReminders() {
+        List<DelayedTask> due = delayedTaskMapper.selectList(new LambdaQueryWrapper<DelayedTask>()
+                .eq(DelayedTask::getStatus, "PENDING")
+                .le(DelayedTask::getFireAt, LocalDateTime.now()));
+        for (DelayedTask task : due) {
+            Map<String, Object> message = new HashMap<>();
+            message.put("delayedTaskId", task.getId());
+            message.put("workOrderId", task.getWorkOrderId());
+            message.put("orderNo", task.getOrderNo());
+            message.put("approverId", task.getApproverId());
+            message.put("priority", task.getPriority());
+            messageProducer.sendReminderNow(message);
+        }
+        return R.ok(Map.of("scanned", due.size()));
     }
 
     @Operation(summary = "我的消息列表")
@@ -90,9 +145,11 @@ public class MessageController {
 
     @Operation(summary = "标记已读")
     @PutMapping("/read/{id}")
-    public R<Void> markRead(@PathVariable Long id) {
+    public R<Void> markRead(@PathVariable Long id,
+                            @RequestHeader("X-User-Id") Long userId) {
         LambdaUpdateWrapper<SysMessage> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(SysMessage::getId, id)
+                .eq(SysMessage::getReceiverId, userId)
                 .set(SysMessage::getIsRead, true)
                 .set(SysMessage::getReadAt, LocalDateTime.now());
         messageMapper.update(null, wrapper);
@@ -113,8 +170,11 @@ public class MessageController {
 
     @Operation(summary = "删除消息")
     @DeleteMapping("/{id}")
-    public R<Void> delete(@PathVariable Long id) {
-        messageMapper.deleteById(id);
+    public R<Void> delete(@PathVariable Long id,
+                          @RequestHeader("X-User-Id") Long userId) {
+        messageMapper.delete(new LambdaQueryWrapper<SysMessage>()
+                .eq(SysMessage::getId, id)
+                .eq(SysMessage::getReceiverId, userId));
         return R.ok();
     }
 
@@ -145,8 +205,9 @@ public class MessageController {
      */
     @Operation(summary = "标记已读（前端适配）")
     @PutMapping("/{id}/read")
-    public R<Void> markReadAlias(@PathVariable Long id) {
-        return markRead(id);
+    public R<Void> markReadAlias(@PathVariable Long id,
+                                 @RequestHeader("X-User-Id") Long userId) {
+        return markRead(id, userId);
     }
 
     /**
@@ -170,6 +231,13 @@ public class MessageController {
         return doRetryDeadLetter(id);
     }
 
+    @Operation(summary = "死信详情")
+    @GetMapping("/dead-letter/{id}")
+    public R<DeadLetter> deadLetterDetail(@PathVariable Long id) {
+        DeadLetter record = deadLetterMapper.selectById(id);
+        return record == null ? R.fail("死信记录不存在") : R.ok(record);
+    }
+
     private R<Void> doRetryDeadLetter(Long id) {
         DeadLetter dl = deadLetterMapper.selectById(id);
         if (dl == null) {
@@ -177,16 +245,31 @@ public class MessageController {
         }
         // SRS 场景七: 死信手动重试最多 dlqMaxRetry 次，超过则标记为“需人工介入”
         if (dl.getRetryCount() != null && dl.getRetryCount() >= dlqMaxRetry) {
-            dl.setStatus("MANUAL");
+            dl.setStatus("FAILED");
             deadLetterMapper.updateById(dl);
-            return R.fail("该死信已重试" + dlqMaxRetry + "次仍失败，已标记为需人工介入");
+            return R.fail("该死信已达到最大重试次数");
         }
-        // 重新发送到 notify 队列
-        messageProducer.sendNotify(dl.getMessageBody());
-        dl.setRetryCount((dl.getRetryCount() != null ? dl.getRetryCount() : 0) + 1);
-        dl.setStatus(dl.getRetryCount() >= dlqMaxRetry ? "MANUAL" : "RESOLVED");
-        dl.setRetriedAt(LocalDateTime.now());
-        deadLetterMapper.updateById(dl);
-        return R.ok();
+        int nextRetry = (dl.getRetryCount() != null ? dl.getRetryCount() : 0) + 1;
+        try {
+            Map<String, Object> body = objectMapper.readValue(
+                    dl.getMessageBody(), new TypeReference<Map<String, Object>>() {});
+            if (body.get("receiverId") == null || body.get("title") == null) {
+                throw new IllegalArgumentException("消息缺少 receiverId/title");
+            }
+            messageProducer.sendNotify(body);
+            dl.setRetryCount(nextRetry);
+            dl.setStatus("RESOLVED");
+            dl.setErrorReason(null);
+            dl.setRetriedAt(LocalDateTime.now());
+            deadLetterMapper.updateById(dl);
+            return R.ok();
+        } catch (Exception e) {
+            dl.setRetryCount(nextRetry);
+            dl.setStatus(nextRetry >= dlqMaxRetry ? "FAILED" : "UNRESOLVED");
+            dl.setErrorReason("人工重投失败: " + e.getMessage());
+            dl.setRetriedAt(LocalDateTime.now());
+            deadLetterMapper.updateById(dl);
+            return R.fail(dl.getErrorReason());
+        }
     }
 }

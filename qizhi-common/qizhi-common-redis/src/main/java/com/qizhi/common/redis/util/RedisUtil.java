@@ -5,6 +5,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.TimeUnit;
+import java.util.Set;
 
 /**
  * Redis 工具类
@@ -33,6 +34,12 @@ public class RedisUtil {
     /** 删除 */
     public Boolean delete(String key) {
         return redisTemplate.delete(key);
+    }
+
+    /** Delete all matching keys in a narrowly scoped cache namespace. */
+    public long deleteByPattern(String pattern) {
+        Set<String> keys = redisTemplate.keys(pattern);
+        return keys == null || keys.isEmpty() ? 0L : redisTemplate.delete(keys);
     }
 
     /** 判断 key 是否存在 */
@@ -65,6 +72,12 @@ public class RedisUtil {
     public Boolean tryLock(String key, long timeout) {
         Boolean result = redisTemplate.opsForValue().setIfAbsent(key, "1", timeout, TimeUnit.SECONDS);
         return Boolean.TRUE.equals(result);
+    }
+
+    /** 写入一次性值（SET NX EX），用于内部调用 nonce 防重放。 */
+    public boolean setIfAbsent(String key, Object value, long timeout, TimeUnit unit) {
+        return Boolean.TRUE.equals(
+                redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit));
     }
 
     /** 释放分布式锁 */

@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: approve-service
+  datasource:
+    hikari:
+      maximum-pool-size: 100
+      minimum-idle: 10
+      connection-timeout: 5000
 
 # 日志级别
 logging:

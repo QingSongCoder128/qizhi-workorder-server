@@ -1,6 +1,7 @@
 package com.qizhi.statistics.feign;
 
 import com.qizhi.common.core.result.R;
+import com.qizhi.common.core.security.InternalCallFeignConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -14,7 +15,7 @@ import java.util.Map;
  * 提供工单列表查询和导出专用接口。
  * </p>
  */
-@FeignClient(name = "work-order-service", path = "/api/v1/workorder")
+@FeignClient(name = "work-order-service", path = "/api/v1/workorder", configuration = InternalCallFeignConfiguration.class)
 public interface WorkOrderFeignClient {
 
     /** 工单列表查询（分页） */

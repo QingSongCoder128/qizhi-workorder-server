@@ -4,6 +4,16 @@ server:
 spring:
   application:
     name: operation-log-service
+  datasource:
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 8
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${VM_IP:192.168.120.128}
+      port: 6379
+      password: ${REDIS_PASSWORD:}
 
 management:
   endpoints:

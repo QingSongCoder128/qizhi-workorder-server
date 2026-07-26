@@ -25,4 +25,5 @@ public class UserVO {
     private String roleCode;
     private String roleName;
     private LocalDateTime createdAt;
+    private java.util.List<String> permissions;
 }

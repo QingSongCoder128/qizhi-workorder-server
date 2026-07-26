@@ -34,6 +34,7 @@ public class SysUser {
     private Integer loginFail;
 
     /** 锁定截止时间 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime lockTime;
 
     @TableField(fill = FieldFill.INSERT)

@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import com.qizhi.ai.config.AiRuntimeConfig;
+import com.qizhi.ai.config.AiRuntimeConfigService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -21,38 +24,11 @@ import java.util.*;
  */
 @Slf4j
 @Component
-@RefreshScope
+@RequiredArgsConstructor
 public class AiModelClient {
 
-    private RestTemplate restTemplate;
+    private final AiRuntimeConfigService runtimeConfigService;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Value("${ai.model.api-url:}")
-    private String apiUrl;
-
-    @Value("${ai.model.api-key:}")
-    private String apiKey;
-
-    @Value("${ai.model.model-name:}")
-    private String modelName;
-
-    @Value("${ai.model.temperature:0.7}")
-    private double temperature;
-
-    @Value("${ai.model.max-tokens:2000}")
-    private int maxTokens;
-
-    /** AI 接口调用超时（毫秒），从 Nacos 读取，默认 10 秒 */
-    @Value("${ai.model.timeout-ms:10000}")
-    private int timeoutMs;
-
-    @PostConstruct
-    public void init() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(timeoutMs);
-        factory.setReadTimeout(timeoutMs);
-        this.restTemplate = new RestTemplate(factory);
-    }
 
     /**
      * 调用大模型 Chat Completions API
@@ -62,30 +38,34 @@ public class AiModelClient {
      * @return 模型返回的文本内容
      */
     public String chat(String systemPrompt, String userPrompt) {
-        log.info("AI模型调用开始: model={}", modelName);
+        AiRuntimeConfig config = runtimeConfigService.get();
+        log.info("AI模型调用开始: model={}", config.modelName());
         long start = System.currentTimeMillis();
 
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(apiKey);
+            headers.setBearerAuth(config.apiKey());
 
             List<Map<String, String>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", systemPrompt));
             messages.add(Map.of("role", "user", "content", userPrompt));
 
             Map<String, Object> requestBody = new LinkedHashMap<>();
-            requestBody.put("model", modelName);
+            requestBody.put("model", config.modelName());
             requestBody.put("messages", messages);
-            requestBody.put("temperature", temperature);
-            requestBody.put("max_tokens", maxTokens);
+            requestBody.put("temperature", config.temperature());
+            requestBody.put("max_tokens", config.maxTokens());
             requestBody.put("response_format", Map.of("type", "json_object"));
 
             String jsonBody = objectMapper.writeValueAsString(requestBody);
             HttpEntity<String> entity = new HttpEntity<>(jsonBody, headers);
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    apiUrl, HttpMethod.POST, entity, String.class);
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+            factory.setConnectTimeout(config.timeoutMs());
+            factory.setReadTimeout(config.timeoutMs());
+            ResponseEntity<String> response = new RestTemplate(factory).exchange(
+                    config.apiUrl(), HttpMethod.POST, entity, String.class);
 
             String responseBody = response.getBody();
             if (responseBody == null || responseBody.isBlank()) {

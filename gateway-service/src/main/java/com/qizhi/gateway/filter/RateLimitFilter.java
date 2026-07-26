@@ -83,7 +83,7 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     private static final String LIMIT_IP_PREFIX = "limit:ip:";
 
     /** 工单提交接口路径，用于匹配独立阈值 */
-    private static final String SUBMIT_PATH = "/api/v1/workorder/submit";
+    private static final String SUBMIT_PATH = "/api/v1/employee/workorders/submit";
 
     /** 限流计数器过期时间（1 秒，实现每秒重置） */
     private static final Duration COUNTER_EXPIRE = Duration.ofSeconds(1);
@@ -224,5 +224,27 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         // 必须在鉴权后执行，才能使用网关注入的 X-User-Id 做账号维度限流。
         // 登录等白名单请求仍会经过 IP 维度限流。
         return -90;
+    }
+
+    public synchronized void updateLimits(int userQps, int ipQps, int submitQps,
+                                          List<String> whiteUsers, List<String> whiteIps) {
+        if (userQps < 1 || ipQps < 1 || submitQps < 1) {
+            throw new IllegalArgumentException("限流阈值必须大于 0");
+        }
+        this.userQps = userQps;
+        this.ipQps = ipQps;
+        this.submitQps = submitQps;
+        this.whiteUsers = whiteUsers == null ? List.of() : List.copyOf(whiteUsers);
+        this.whiteIps = whiteIps == null ? List.of() : List.copyOf(whiteIps);
+    }
+
+    public java.util.Map<String, Object> currentConfiguration() {
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("userQps", userQps);
+        result.put("ipQps", ipQps);
+        result.put("submitQps", submitQps);
+        result.put("whiteUsers", List.copyOf(whiteUsers));
+        result.put("whiteIps", List.copyOf(whiteIps));
+        return result;
     }
 }

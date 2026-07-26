@@ -49,4 +49,7 @@ public class ApprovalActionDTO {
     // ---- 减签专用字段 ----
     /** 要跳过的节点序号（action=REMOVE_NODE 时必填） */
     private Integer removeNodeOrder;
+
+    /** 客户端读取详情时获得的审批实例版本，用于并发冲突检测。 */
+    private Integer versionNo;
 }

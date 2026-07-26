@@ -20,4 +20,5 @@ public class LoginVO {
     private String phone;
     private String email;
     private String avatarUrl;
+    private java.util.List<String> permissions;
 }

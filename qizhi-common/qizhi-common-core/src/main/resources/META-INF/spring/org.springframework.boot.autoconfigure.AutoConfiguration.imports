@@ -1,0 +1,2 @@
+com.qizhi.common.core.config.FeignTraceIdConfig
+com.qizhi.common.core.security.InternalCallFeignConfiguration

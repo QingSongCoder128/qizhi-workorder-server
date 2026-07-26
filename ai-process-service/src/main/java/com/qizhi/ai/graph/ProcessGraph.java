@@ -8,6 +8,7 @@ import com.qizhi.ai.model.WorkOrderContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import com.qizhi.ai.config.AiRuntimeConfigService;
 import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +35,7 @@ public class ProcessGraph {
     private final CategoryAgent categoryAgent;
     private final RatingAgent ratingAgent;
     private final PreAuditAgent preAuditAgent;
+    private final AiRuntimeConfigService runtimeConfigService;
 
     /** 节点枚举（有序） */
     public static final String NODE_CATEGORY = "CATEGORY";
@@ -41,13 +43,6 @@ public class ProcessGraph {
     public static final String NODE_PRE_AUDIT = "PRE_AUDIT";
 
     /** 每个 Agent 的最大重试次数，从 Nacos 读取，默认 2 */
-    @Value("${ai.graph.max-retry:2}")
-    private int maxRetry;
-
-    /** 重试间隔（毫秒），从 Nacos 读取，默认 500 */
-    @Value("${ai.graph.retry-interval-ms:500}")
-    private long retryIntervalMs;
-
     /**
      * 执行完整的 AI 处理流程
      * <p>
@@ -60,19 +55,33 @@ public class ProcessGraph {
     public void execute(WorkOrderContext context) {
         log.info("Graph 流程开始: taskId={}, workOrderId={}", context.getTaskId(), context.getWorkOrderId());
 
-        // 节点1: 分类
-        executeCategory(context);
-        context.setLastCompletedNode(NODE_CATEGORY);
-
-        // 节点2: 评级（可参考分类结果）
-        executeRating(context);
-        context.setLastCompletedNode(NODE_RATING);
-
-        // 节点3: 预审（可参考全部上下文）
-        executePreAudit(context);
-        context.setLastCompletedNode(NODE_PRE_AUDIT);
+        for (String node : runtimeConfigService.get().nodeOrder()) {
+            executeNode(context, node);
+            context.setLastCompletedNode(node);
+        }
 
         log.info("Graph 流程结束: taskId={}, aiAbnormal={}", context.getTaskId(), context.getAiAbnormal());
+    }
+
+    public void resumeFailedNodes(WorkOrderContext context) {
+        for (String node : runtimeConfigService.get().nodeOrder()) {
+            boolean alreadySucceeded = context.getAgentResults().stream()
+                    .anyMatch(result -> node.equals(result.getAgentName())
+                            && "SUCCESS".equals(result.getStatus()));
+            if (!alreadySucceeded) {
+                executeNode(context, node);
+                context.setLastCompletedNode(node);
+            }
+        }
+    }
+
+    private void executeNode(WorkOrderContext context, String node) {
+        switch (node) {
+            case NODE_CATEGORY -> executeCategory(context);
+            case NODE_RATING -> executeRating(context);
+            case NODE_PRE_AUDIT -> executePreAudit(context);
+            default -> throw new IllegalArgumentException("未知 Graph 节点: " + node);
+        }
     }
 
     /**
@@ -80,6 +89,8 @@ public class ProcessGraph {
      * 输出: context.category, context.confidence
      */
     private void executeCategory(WorkOrderContext context) {
+        int maxRetry = runtimeConfigService.get().maxRetry();
+        long retryIntervalMs = runtimeConfigService.get().retryIntervalMs();
         log.info("[CATEGORY] 开始: type={}", context.getType());
         long start = System.currentTimeMillis();
 
@@ -129,6 +140,8 @@ public class ProcessGraph {
      * 读取 context.category 辅助评级，输出: context.priority, context.priorityReason
      */
     private void executeRating(WorkOrderContext context) {
+        int maxRetry = runtimeConfigService.get().maxRetry();
+        long retryIntervalMs = runtimeConfigService.get().retryIntervalMs();
         log.info("[RATING] 开始: urgent={}, category={}", context.getUrgent(), context.getCategory());
         long start = System.currentTimeMillis();
 
@@ -176,6 +189,8 @@ public class ProcessGraph {
      * 读取全部上下文信息，输出: context.suggestion, context.sensitiveWords, context.pass
      */
     private void executePreAudit(WorkOrderContext context) {
+        int maxRetry = runtimeConfigService.get().maxRetry();
+        long retryIntervalMs = runtimeConfigService.get().retryIntervalMs();
         log.info("[PRE_AUDIT] 开始: title长度={}", context.getTitle() != null ? context.getTitle().length() : 0);
         long start = System.currentTimeMillis();
 

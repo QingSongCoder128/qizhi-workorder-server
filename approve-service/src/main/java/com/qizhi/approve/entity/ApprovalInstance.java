@@ -46,6 +46,9 @@ public class ApprovalInstance {
     /** PENDING/APPROVING/APPROVED/REJECTED */
     private String status;
 
+    @Version
+    private Integer versionNo;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

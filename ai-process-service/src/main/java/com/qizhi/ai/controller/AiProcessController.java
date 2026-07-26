@@ -7,7 +7,11 @@ import com.qizhi.ai.mapper.AiTaskLogMapper;
 import com.qizhi.ai.model.AgentResult;
 import com.qizhi.ai.model.WorkOrderContext;
 import com.qizhi.ai.supervisor.AiSupervisor;
+import com.qizhi.ai.config.AiRuntimeConfig;
+import com.qizhi.ai.config.AiRuntimeConfigService;
+import com.qizhi.ai.client.AiModelClient;
 import com.qizhi.common.core.result.R;
+import com.qizhi.common.redis.util.RedisUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * AI 智能处理控制器
@@ -36,6 +41,9 @@ public class AiProcessController {
     private final ProcessGraph processGraph;
     private final AiSupervisor supervisor;
     private final AiTaskLogMapper taskLogMapper;
+    private final AiRuntimeConfigService runtimeConfigService;
+    private final AiModelClient aiModelClient;
+    private final RedisUtil redisUtil;
 
     /**
      * AI 预处理工单（供 work-order-service Feign 同步调用）
@@ -82,6 +90,7 @@ public class AiProcessController {
 
             // Graph 流程引擎执行三个 Agent
             processGraph.execute(context);
+            redisUtil.set("ai:task:checkpoint:" + taskId, context, 24, TimeUnit.HOURS);
 
             // 保存各 Agent 的执行日志
             for (AgentResult agentResult : context.getAgentResults()) {
@@ -128,6 +137,93 @@ public class AiProcessController {
         status.put("maxConcurrent", supervisor.getMaxConcurrent());
         status.put("available", supervisor.getRunningCount() < supervisor.getMaxConcurrent());
         return R.ok(status);
+    }
+
+    @PostMapping("/tasks/{taskId}/resume")
+    public R<Map<String, Object>> resume(@PathVariable String taskId) {
+        Object checkpoint = redisUtil.get("ai:task:checkpoint:" + taskId);
+        if (!(checkpoint instanceof WorkOrderContext context)) {
+            return R.fail("AI任务检查点不存在或已过期");
+        }
+        if (!supervisor.tryAcquire()) {
+            return R.fail(429, "AI并发已满，请稍后重试");
+        }
+        try {
+            context.getAgentResults().removeIf(result -> "FAILED".equals(result.getStatus()));
+            int before = context.getAgentResults().size();
+            processGraph.resumeFailedNodes(context);
+            for (int i = before; i < context.getAgentResults().size(); i++) {
+                AgentResult result = context.getAgentResults().get(i);
+                saveLog(taskId, context.getWorkOrderId(), result.getAgentName(),
+                        buildInputText(context, result.getAgentName()),
+                        result.getData() == null ? "" : result.getData().toString(),
+                        result.getStatus(), (int) result.getDurationMs(),
+                        result.getRetryCount(), result.getErrorMsg());
+            }
+            redisUtil.set("ai:task:checkpoint:" + taskId, context, 24, TimeUnit.HOURS);
+            Map<String, Object> response = new java.util.LinkedHashMap<>();
+            response.put("taskId", taskId);
+            response.put("resumed", true);
+            response.put("aiAbnormal", context.getAgentResults().stream()
+                    .anyMatch(result -> !"SUCCESS".equals(result.getStatus())));
+            response.put("agentResults", context.getAgentResults());
+            response.put("category", context.getCategory());
+            response.put("confidence", context.getConfidence());
+            response.put("priority", context.getPriority());
+            response.put("priorityReason", context.getPriorityReason());
+            response.put("suggestion", context.getSuggestion());
+            response.put("sensitiveWords", context.getSensitiveWords());
+            response.put("pass", context.getPass());
+            return R.ok(response);
+        } finally {
+            supervisor.release();
+        }
+    }
+
+    @GetMapping("/config")
+    public R<Map<String, Object>> getConfig() {
+        AiRuntimeConfig config = runtimeConfigService.get();
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("apiUrl", maskUrl(config.apiUrl()));
+        result.put("keyConfigured", config.apiKey() != null && !config.apiKey().isBlank());
+        result.put("modelName", config.modelName());
+        result.put("temperature", config.temperature());
+        result.put("maxTokens", config.maxTokens());
+        result.put("timeoutMs", config.timeoutMs());
+        result.put("maxConcurrent", config.maxConcurrent());
+        result.put("maxRetry", config.maxRetry());
+        result.put("retryIntervalMs", config.retryIntervalMs());
+        result.put("nodeOrder", config.nodeOrder());
+        return R.ok(result);
+    }
+
+    @PutMapping("/config")
+    public R<Map<String, Object>> updateConfig(@RequestBody Map<String, Object> update) throws Exception {
+        runtimeConfigService.publish(update);
+        return getConfig();
+    }
+
+    @PostMapping("/config/validate")
+    public R<Map<String, Object>> validateConfig() {
+        long start = System.currentTimeMillis();
+        Map<String, Object> response = aiModelClient.chatAsMap(
+                "你是连通性检查器，只返回JSON。",
+                "返回 {\"ok\":true}，不要包含其他内容。");
+        return R.ok(Map.of(
+                "valid", Boolean.TRUE.equals(response.get("ok")),
+                "elapsedMs", System.currentTimeMillis() - start));
+    }
+
+    private String maskUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            return uri.getScheme() + "://" + uri.getHost() + "/***";
+        } catch (Exception e) {
+            return "***";
+        }
     }
 
     /**

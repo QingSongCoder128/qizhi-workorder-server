@@ -93,6 +93,7 @@ public class ApproveServiceImpl implements ApproveService {
         instance.setPriority(dto.getPriority());
         instance.setWorkType(dto.getWorkType());
         instance.setStatus("PENDING");
+        instance.setVersionNo(1);
 
         if (template != null) {
             // 2. 有模板：读取节点定义，创建多级审批记录
@@ -257,6 +258,12 @@ public class ApproveServiceImpl implements ApproveService {
         if (!"PENDING".equals(instance.getStatus()) && !"APPROVING".equals(instance.getStatus())) {
             throw new BusinessException("该审批单已结束，无法操作");
         }
+        if (instance.getApproverId() == null || !instance.getApproverId().equals(operatorId)) {
+            throw new BusinessException(403, "只有当前审批人可以执行该操作");
+        }
+        if (dto.getVersionNo() != null && !dto.getVersionNo().equals(instance.getVersionNo())) {
+            throw new BusinessException(409, "审批数据已更新，请刷新后重试");
+        }
 
         // SRS 业务规则：审批人不能审批自己提交的工单
         if (instance.getSubmitterId() != null && instance.getSubmitterId().equals(operatorId)) {
@@ -337,6 +344,7 @@ public class ApproveServiceImpl implements ApproveService {
         workOrder.put("currentNode", instance.getCurrentNode());
         workOrder.put("currentOrder", instance.getCurrentOrder());
         workOrder.put("totalNodes", instance.getTotalNodes());
+        workOrder.put("versionNo", instance.getVersionNo());
         workOrder.put("type", instance.getWorkType());
         workOrder.put("createdAt", instance.getCreatedAt());
 
@@ -496,6 +504,9 @@ public class ApproveServiceImpl implements ApproveService {
         if (dto.getTransferToUserId() == null) {
             throw new BusinessException("转交目标审批人不能为空");
         }
+        if (dto.getTransferToUserId().equals(operatorId)) {
+            throw new BusinessException("不能转交给自己");
+        }
         // 记录转交操作
         ApprovalRecord record = findCurrentRecord(instance);
         if (record != null) {
@@ -590,6 +601,14 @@ public class ApproveServiceImpl implements ApproveService {
         ApprovalRecord targetRecord = findRecordByOrder(instance.getId(), targetOrder);
         if (targetRecord == null) {
             throw new BusinessException("节点不存在: order=" + targetOrder);
+        }
+        long remaining = recordMapper.selectCount(
+                new LambdaQueryWrapper<ApprovalRecord>()
+                        .eq(ApprovalRecord::getApprovalId, instance.getId())
+                        .gt(ApprovalRecord::getNodeOrder, instance.getCurrentOrder())
+                        .eq(ApprovalRecord::getStatus, "PENDING"));
+        if (remaining <= 1) {
+            throw new BusinessException("至少保留一个后续审批节点");
         }
         // 标记为 SKIPPED
         targetRecord.setStatus("SKIPPED");

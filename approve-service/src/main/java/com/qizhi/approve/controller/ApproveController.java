@@ -139,6 +139,7 @@ public class ApproveController {
         dto.setApprovalId(id);
         dto.setAction("APPROVE");
         dto.setOpinion(body.get("comment"));
+        applyVersion(dto, body);
         approveService.action(dto, userId, username);
         return R.ok();
     }
@@ -157,6 +158,7 @@ public class ApproveController {
         dto.setApprovalId(id);
         dto.setAction("REJECT");
         dto.setOpinion(body.get("comment"));
+        applyVersion(dto, body);
         approveService.action(dto, userId, username);
         return R.ok();
     }
@@ -177,6 +179,7 @@ public class ApproveController {
         dto.setApprovalId(id);
         dto.setAction("TRANSFER");
         dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
+        applyVersion(dto, body);
 
         // 方式1：前端直传 userId + userName
         if (body.get("transferToUserId") != null) {
@@ -226,6 +229,7 @@ public class ApproveController {
         }
         dto.setAddNodeApproverName((String) body.get("approverName"));
         dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
+        applyVersion(dto, body);
         approveService.action(dto, userId, username);
         return R.ok();
     }
@@ -246,7 +250,15 @@ public class ApproveController {
             dto.setRemoveNodeOrder(Integer.valueOf(String.valueOf(body.get("nodeOrder"))));
         }
         dto.setOpinion(body.get("reason") != null ? String.valueOf(body.get("reason")) : null);
+        applyVersion(dto, body);
         approveService.action(dto, userId, username);
         return R.ok();
+    }
+
+    private static void applyVersion(ApprovalActionDTO dto, Map<String, ?> body) {
+        Object version = body.get("versionNo");
+        if (version != null) {
+            dto.setVersionNo(Integer.valueOf(String.valueOf(version)));
+        }
     }
 }
