@@ -42,7 +42,7 @@ public class InternalCallAuthenticationFilter extends OncePerRequestFilter {
     @Value("${security.internal.max-skew-seconds:300}")
     private long maxSkewSeconds;
 
-    @Value("${security.internal.allowed-callers:gateway-service,user-service,work-order-service,approve-service,message-service,ai-process-service,statistics-service,operation-log-service}")
+    @Value("${security.internal.allowed-callers:gateway-service,user-service,work-order-service,approve-service,message-service,ai-process-service,statistics-service}")
     private String allowedCallersConfig;
 
     @Override

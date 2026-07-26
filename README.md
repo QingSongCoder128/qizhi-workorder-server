@@ -204,7 +204,7 @@ java -jar user-service/target/user-service-1.0.0.jar
 
 - 模式：AT（无侵入，基于undo_log自动回滚）
 - 事务组：`qizhi_tx_group`
-- 场景：工单提交后，work-order-service发起全局事务，approve-service（生成审批单）和日志服务（写操作日志）参与分支事务
+- 场景：工单提交后，work-order-service 发起全局事务，approve-service 生成审批单，work-order-service 在同一事务中跨库写入 `qizhi_log.operate_log`
 - 任一环节异常→全局回滚，保证数据一致性
 
 ## AI服务说明

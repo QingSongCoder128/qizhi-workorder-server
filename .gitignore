@@ -19,5 +19,16 @@ Thumbs.db
 # ��־���Ŀ¼
 logs/
 
-# 运行时上传文件（头像/附件）
-uploads/
+# 旧版根目录上传目录禁止纳入版本库
+/uploads/
+
+# 模块内运行时上传文件，仅保留目录骨架
+user-service/uploads/*
+!user-service/uploads/avatar/
+user-service/uploads/avatar/*
+!user-service/uploads/avatar/.gitkeep
+
+work-order-service/uploads/*
+!work-order-service/uploads/work-order/
+work-order-service/uploads/work-order/*
+!work-order-service/uploads/work-order/.gitkeep

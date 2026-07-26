@@ -11,7 +11,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -164,12 +173,27 @@ public class WorkOrderController {
         return R.ok();
     }
 
-    /**
-     * 附件上传（存本地 uploads 目录，返回可访问 URL）
-     */
+    /** 附件上传到工单服务模块目录。 */
     @Operation(summary = "附件上传")
     @PostMapping("/attachment/upload")
     public R<Map<String, String>> uploadAttachment(@RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
         return R.ok(workOrderService.uploadAttachment(file));
+    }
+
+    @Operation(summary = "读取工单附件")
+    @GetMapping("/attachment/{filename:.+}")
+    public ResponseEntity<Resource> attachment(@PathVariable String filename) throws java.io.IOException {
+        Path path = workOrderService.resolveAttachment(filename);
+        String detected = Files.probeContentType(path);
+        MediaType mediaType = detected == null
+                ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(detected);
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(Files.size(path))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.inline()
+                                .filename(filename, StandardCharsets.UTF_8)
+                                .build().toString())
+                .body(new FileSystemResource(path));
     }
 }

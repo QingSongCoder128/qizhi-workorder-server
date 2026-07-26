@@ -15,12 +15,17 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 
 @Tag(name = "用户管理")
 @RestController
@@ -30,6 +35,9 @@ public class UserController {
 
     private final UserService userService;
     private final SysUserMapper userMapper;
+
+    @Value("${storage.avatar.root:uploads/avatar}")
+    private String avatarStorageRoot;
 
     @Operation(summary = "获取当前用户信息")
     @GetMapping("/me")
@@ -160,14 +168,10 @@ public class UserController {
             throw new BusinessException("头像文件不能超过 2MB");
         }
         try {
-            String uploadDir = System.getProperty("user.dir") + "/uploads/avatar";
-            java.io.File dir = new java.io.File(uploadDir);
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
+            Path root = avatarRoot();
             String fileName = java.util.UUID.randomUUID().toString().replace("-", "") + ext;
-            java.io.File dest = new java.io.File(dir, fileName);
-            file.transferTo(dest);
+            Path destination = root.resolve(fileName).normalize();
+            Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             String avatarUrl = "/api/v1/user/avatar/" + fileName;
             // 更新数据库
@@ -198,8 +202,9 @@ public class UserController {
                 response.setStatus(400);
                 return;
             }
-            java.io.File file = new java.io.File(System.getProperty("user.dir") + "/uploads/avatar/" + filename);
-            if (!file.exists()) {
+            Path root = avatarRoot();
+            Path file = root.resolve(filename).normalize();
+            if (!file.startsWith(root) || !Files.isRegularFile(file)) {
                 response.setStatus(404);
                 return;
             }
@@ -211,14 +216,24 @@ public class UserController {
                 default -> "image/jpeg";
             };
             response.setContentType(contentType);
-            response.setContentLengthLong(file.length());
-            try (java.io.FileInputStream fis = new java.io.FileInputStream(file);
+            response.setContentLengthLong(Files.size(file));
+            try (java.io.InputStream input = Files.newInputStream(file);
                  java.io.OutputStream os = response.getOutputStream()) {
-                fis.transferTo(os);
+                input.transferTo(os);
                 os.flush();
             }
         } catch (Exception e) {
             response.setStatus(500);
+        }
+    }
+
+    private Path avatarRoot() {
+        try {
+            Path root = Paths.get(avatarStorageRoot).toAbsolutePath().normalize();
+            Files.createDirectories(root);
+            return root;
+        } catch (Exception exception) {
+            throw new BusinessException("头像存储目录不可用");
         }
     }
 }

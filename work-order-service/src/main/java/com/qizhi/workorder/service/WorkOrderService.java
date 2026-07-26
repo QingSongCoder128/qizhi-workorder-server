@@ -7,6 +7,7 @@ import com.qizhi.workorder.vo.WorkOrderDetailVO;
 
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Path;
 
 public interface WorkOrderService {
 
@@ -48,6 +49,9 @@ public interface WorkOrderService {
 
     /** 附件上传，返回文件访问 URL */
     Map<String, String> uploadAttachment(org.springframework.web.multipart.MultipartFile file);
+
+    /** 安全解析模块内附件文件，禁止路径越界。 */
+    Path resolveAttachment(String filename);
 
     String generateOrderNo();
 }

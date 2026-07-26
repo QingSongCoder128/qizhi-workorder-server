@@ -1,16 +1,16 @@
-package com.qizhi.log.entity;
+package com.qizhi.workorder.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/**
+ * 工单服务写入的跨库操作日志。
+ *
+ * <p>日志表保留在 qizhi_log 库，但不再为它单独部署微服务。</p>
+ */
 @Data
-@TableName("operate_log")
 public class OperationLog {
-    @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
     private String userName;

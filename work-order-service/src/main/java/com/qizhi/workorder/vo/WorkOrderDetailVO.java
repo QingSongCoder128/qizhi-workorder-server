@@ -43,6 +43,9 @@ public class WorkOrderDetailVO {
     private LocalDateTime createdAt;
     private LocalDateTime completedAt;
 
+    // 附件访问地址
+    private List<String> attachments;
+
     // 审批时间线（前端字段名 approvalNodes）
     private List<ApprovalTimeline> approvalNodes;
 

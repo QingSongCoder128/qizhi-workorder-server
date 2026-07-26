@@ -12,10 +12,11 @@ import com.qizhi.workorder.domain.WorkOrderStateMachine;
 import com.qizhi.workorder.entity.WorkOrder;
 import com.qizhi.workorder.entity.WorkOrderAttachment;
 import com.qizhi.workorder.entity.WorkOrderHistory;
+import com.qizhi.workorder.entity.OperationLog;
 import com.qizhi.workorder.feign.AiProcessFeignClient;
 import com.qizhi.workorder.feign.ApproveFeignClient;
 import com.qizhi.workorder.feign.MessageFeignClient;
-import com.qizhi.workorder.feign.OperationLogFeignClient;
+import com.qizhi.workorder.mapper.OperationLogMapper;
 import com.qizhi.workorder.mapper.WorkOrderAttachmentMapper;
 import com.qizhi.workorder.mapper.WorkOrderHistoryMapper;
 import com.qizhi.workorder.mapper.WorkOrderMapper;
@@ -34,6 +35,10 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.HashMap;
 import java.util.List;
@@ -70,10 +75,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final WorkOrderMapper workOrderMapper;
     private final WorkOrderHistoryMapper historyMapper;
     private final WorkOrderAttachmentMapper attachmentMapper;
+    private final OperationLogMapper operationLogMapper;
     private final AiProcessFeignClient aiProcessFeignClient;
     private final ApproveFeignClient approveFeignClient;
     private final MessageFeignClient messageFeignClient;
-    private final OperationLogFeignClient operationLogFeignClient;
     private final RedisUtil redisUtil;
 
     /** 分布式锁过期时间（秒），从 Nacos 读取，默认 30 */
@@ -99,6 +104,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     /** 允许的附件扩展名 */
     @Value("#{'${workorder.attachment.allowed-extensions:jpg,jpeg,png,pdf}'.split(',')}")
     private List<String> allowedAttachmentExtensions;
+
+    /** 工单服务模块内附件目录。 */
+    @Value("${storage.attachment.root:uploads/work-order}")
+    private String attachmentStorageRoot;
 
     /** 超时阈值-加急（分钟），从 Nacos 读取，默认 60 */
     @Value("${workorder.timeout.urgent-minutes:60}")
@@ -288,17 +297,18 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException("审批单创建失败，全局事务回滚");
         }
 
-        // ---- operation-log-service 第三事务分支：写入操作日志 ----
-        Map<String, Object> logRequest = new HashMap<>();
-        logRequest.put("userId", userId);
-        logRequest.put("userName", username);
-        logRequest.put("module", "WORK_ORDER");
-        logRequest.put("action", "SUBMIT");
-        logRequest.put("targetType", "WORK_ORDER");
-        logRequest.put("targetId", order.getId());
-        logRequest.put("detail", "提交工单并创建审批流程: " + order.getOrderNo());
-        var logResult = operationLogFeignClient.create(logRequest);
-        if (logResult == null || logResult.getCode() != 200) {
+        // ---- 工单服务本地跨库分支：写入 qizhi_log 操作日志 ----
+        OperationLog operationLog = new OperationLog();
+        operationLog.setUserId(userId);
+        operationLog.setUserName(username);
+        operationLog.setModule("WORK_ORDER");
+        operationLog.setAction("SUBMIT");
+        operationLog.setTargetType("WORK_ORDER");
+        operationLog.setTargetId(order.getId());
+        operationLog.setDetail("提交工单并创建审批流程: " + order.getOrderNo());
+        operationLog.setSeataXid(io.seata.core.context.RootContext.getXID());
+        operationLog.setCreatedAt(LocalDateTime.now());
+        if (operationLogMapper.insert(operationLog) != 1) {
             throw new BusinessException("操作日志写入失败，全局事务回滚");
         }
 
@@ -413,6 +423,15 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                         .build())
                 .collect(Collectors.toList());
 
+        List<String> attachmentUrls = attachmentMapper.selectList(
+                        new LambdaQueryWrapper<WorkOrderAttachment>()
+                                .eq(WorkOrderAttachment::getWorkOrderId, id)
+                                .orderByAsc(WorkOrderAttachment::getCreatedAt))
+                .stream()
+                .map(WorkOrderAttachment::getFileUrl)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toList());
+
         // 审批时间线：Feign 调用 approve-service 获取审批记录
         List<WorkOrderDetailVO.ApprovalTimeline> timelineList = new ArrayList<>();
         try {
@@ -456,6 +475,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .versionNo(order.getVersionNo())
                 .createdAt(order.getCreatedAt())
                 .completedAt(order.getCompletedAt())
+                .attachments(attachmentUrls)
                 .approvalNodes(timelineList)
                 .statusHistory(historyList)
                 .build();
@@ -728,32 +748,50 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
     }
 
-    /**
-     * 附件上传（存本地 uploads 目录，返回可访问 URL）
-     */
+    /** 附件上传到 work-order-service/uploads/work-order。 */
     @Override
     public Map<String, String> uploadAttachment(org.springframework.web.multipart.MultipartFile file) {
         validateUpload(file);
         try {
-            String uploadDir = System.getProperty("user.dir") + "/uploads";
-            java.io.File dir = new java.io.File(uploadDir);
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
+            Path root = attachmentRoot();
             String originalName = file.getOriginalFilename();
             String ext = (originalName != null && originalName.contains("."))
                     ? originalName.substring(originalName.lastIndexOf(".")).toLowerCase(Locale.ROOT) : "";
             String fileName = java.util.UUID.randomUUID().toString().replace("-", "") + ext;
-            java.io.File dest = new java.io.File(dir, fileName);
-            file.transferTo(dest);
+            Path destination = root.resolve(fileName).normalize();
+            Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             Map<String, String> result = new LinkedHashMap<>();
-            result.put("url", "/uploads/" + fileName);
+            result.put("url", "/api/v1/employee/workorders/attachment/" + fileName);
             result.put("fileName", originalName);
             return result;
         } catch (Exception e) {
             log.error("附件上传失败: {}", e.getMessage(), e);
             throw new BusinessException("附件上传失败");
+        }
+    }
+
+    @Override
+    public Path resolveAttachment(String filename) {
+        if (!StringUtils.hasText(filename)
+                || !filename.equals(Paths.get(filename).getFileName().toString())) {
+            throw new BusinessException("附件路径非法");
+        }
+        Path root = attachmentRoot();
+        Path candidate = root.resolve(filename).normalize();
+        if (!candidate.startsWith(root) || !Files.isRegularFile(candidate)) {
+            throw new BusinessException("附件不存在");
+        }
+        return candidate;
+    }
+
+    private Path attachmentRoot() {
+        try {
+            Path root = Paths.get(attachmentStorageRoot).toAbsolutePath().normalize();
+            Files.createDirectories(root);
+            return root;
+        } catch (Exception exception) {
+            throw new BusinessException("附件存储目录不可用");
         }
     }
 

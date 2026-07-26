@@ -19,7 +19,6 @@
         <module>message-service</module>
         <module>ai-process-service</module>
         <module>statistics-service</module>
-        <module>operation-log-service</module>
     </modules>
 
     <properties>
