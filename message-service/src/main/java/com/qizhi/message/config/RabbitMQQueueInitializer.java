@@ -7,6 +7,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.Map;
 import java.util.Properties;
@@ -32,6 +33,9 @@ public class RabbitMQQueueInitializer {
     private final RabbitAdmin rabbitAdmin;
     private final RabbitTemplate rabbitTemplate;
 
+    @Value("${rabbitmq.migration.old-delay-queue-enabled:false}")
+    private boolean oldDelayQueueMigrationEnabled;
+
     /** 旧队列名称（单队列方案遗留） */
     private static final String OLD_DELAY_QUEUE = "delay.remind.queue";
 
@@ -45,6 +49,10 @@ public class RabbitMQQueueInitializer {
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
+        if (!oldDelayQueueMigrationEnabled) {
+            log.info("旧延迟队列迁移未启用；不会自动搬迁或删除任何现有队列");
+            return;
+        }
         log.info("========== RabbitMQ 队列初始化检查开始 ==========");
         try {
             migrateOldDelayQueue();

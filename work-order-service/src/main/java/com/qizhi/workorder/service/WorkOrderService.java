@@ -38,7 +38,7 @@ public interface WorkOrderService {
     List<Map<String, Object>> getExportList(String deptCode, String type, String startDate, String endDate);
 
     /** 实时统计看板数据（供 statistics-service Feign 调用） */
-    Map<String, Object> getStats();
+    Map<String, Object> getStats(String deptCode, String startDate, String endDate, String workType);
 
     /** 撤销工单（仅待审批状态可撤销） */
     void revoke(Long id, Long userId);

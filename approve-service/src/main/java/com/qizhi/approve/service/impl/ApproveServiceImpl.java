@@ -218,7 +218,8 @@ public class ApproveServiceImpl implements ApproveService {
         Long todayCompleted = recordMapper.selectCount(
                 new LambdaQueryWrapper<ApprovalRecord>()
                         .eq(ApprovalRecord::getOperatorId, approverId)
-                        .in(ApprovalRecord::getAction, "APPROVED", "REJECTED")
+                .in(ApprovalRecord::getAction,
+                        "APPROVE", "REJECT", "APPROVED", "REJECTED")
                         .ge(ApprovalRecord::getOperatedAt, todayStart));
 
         Map<String, Object> stats = new HashMap<>();
@@ -263,10 +264,12 @@ public class ApproveServiceImpl implements ApproveService {
         }
 
         switch (dto.getAction()) {
-            case "APPROVED":
+            case "APPROVE":
+            case "APPROVED": // 兼容升级前调用方
                 handleApproved(instance, dto, operatorId, operatorName);
                 break;
-            case "REJECTED":
+            case "REJECT":
+            case "REJECTED": // 兼容升级前调用方
                 handleRejected(instance, dto, operatorId, operatorName);
                 break;
             case "TRANSFER":
@@ -416,6 +419,7 @@ public class ApproveServiceImpl implements ApproveService {
                                  Long operatorId, String operatorName) {
         // 更新当前节点记录
         updateCurrentRecord(instance, "APPROVED", operatorId, operatorName, dto.getOpinion());
+        updateCurrentRecordAction(instance, "APPROVE");
 
         if (instance.getCurrentOrder() >= instance.getTotalNodes()) {
             // 所有节点通过，审批完结
@@ -435,6 +439,7 @@ public class ApproveServiceImpl implements ApproveService {
                 instance.setCurrentOrder(nextRecord.getNodeOrder());
                 instance.setCurrentNode(nextRecord.getNodeName());
                 instance.setApproverId(nextRecord.getApproverId());
+                instance.setApproverName(nextRecord.getApproverName());
                 instance.setStatus("APPROVING");
                 // 回调 work-order-service 更新工单状态为 APPROVING（审批中）
                 updateWorkOrderStatus(instance.getWorkOrderId(), "APPROVING", "审批流转中，当前节点: " + nextRecord.getNodeName());
@@ -468,6 +473,7 @@ public class ApproveServiceImpl implements ApproveService {
     private void handleRejected(ApprovalInstance instance, ApprovalActionDTO dto,
                                  Long operatorId, String operatorName) {
         updateCurrentRecord(instance, "REJECTED", operatorId, operatorName, dto.getOpinion());
+        updateCurrentRecordAction(instance, "REJECT");
         instance.setStatus("REJECTED");
         instanceMapper.updateById(instance);
 
@@ -655,6 +661,14 @@ public class ApproveServiceImpl implements ApproveService {
         }
     }
 
+    private void updateCurrentRecordAction(ApprovalInstance instance, String action) {
+        ApprovalRecord record = findCurrentRecord(instance);
+        if (record != null) {
+            record.setAction(action);
+            recordMapper.updateById(record);
+        }
+    }
+
     /**
      * 查找当前节点的审批记录
      */
@@ -703,9 +717,15 @@ public class ApproveServiceImpl implements ApproveService {
             Map<String, String> body = new HashMap<>();
             body.put("status", status);
             body.put("remark", remark);
-            workOrderFeignClient.updateStatus(workOrderId, body);
+            R<Void> result = workOrderFeignClient.updateStatus(workOrderId, body);
+            if (result == null || result.getCode() == null || result.getCode() != 200) {
+                throw new BusinessException("工单状态更新失败");
+            }
         } catch (Exception e) {
             log.error("回调更新工单状态失败: workOrderId={}, status={}, error={}", workOrderId, status, e.getMessage());
+            throw e instanceof BusinessException
+                    ? (BusinessException) e
+                    : new BusinessException("工单状态更新失败，审批操作已回滚");
         }
     }
 

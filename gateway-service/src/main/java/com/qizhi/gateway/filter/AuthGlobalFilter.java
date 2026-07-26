@@ -38,12 +38,13 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     private final ReactiveRedisTemplate<String, Object> reactiveRedisTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** 白名单路径（无需鉴权） */
-    private static final List<String> WHITE_LIST = List.of(
-            "/api/v1/auth/login",
-            "/api/v1/auth/register",
-            "/api/v1/user/avatar"
-    );
+    /** 白名单路径（无需鉴权），由 Nacos 管理 */
+    @Value("#{'${gateway.auth-white-list:/api/v1/auth/login,/api/v1/user/avatar}'.split(',')}")
+    private List<String> authWhiteList;
+
+    /** 可动态屏蔽的高危路径 */
+    @Value("#{'${gateway.black-list:}'.split(',')}")
+    private List<String> blackList;
 
     /**
      * 管理端路径前缀（仅 ADMIN 角色可访问）
@@ -67,7 +68,14 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                 ? exchange.getRequest().getMethod().name() : "GET";
 
         // 白名单放行（头像路径仅 GET 获取免鉴权，POST 上传仍需正常鉴权）
-        for (String white : WHITE_LIST) {
+        for (String blocked : blackList) {
+            if (!blocked.isBlank() && path.startsWith(blocked.trim())) {
+                return writeForbiddenResponse(exchange, "接口已被安全策略禁用");
+            }
+        }
+
+        for (String white : authWhiteList) {
+            white = white.trim();
             if (path.startsWith(white)) {
                 if ("/api/v1/user/avatar".equals(white) && !"GET".equals(method)) {
                     break; // 头像上传等非 GET 请求走下方正常鉴权流程
@@ -87,8 +95,6 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         String sessionKey = SESSION_PREFIX + sessionId;
         log.debug("准备从Redis读取session: key={}", sessionKey);
         return reactiveRedisTemplate.opsForValue().get(sessionKey)
-                .doOnNext(sessionObj -> log.debug("Redis返回值: type={}, value={}",
-                        sessionObj != null ? sessionObj.getClass().getName() : "null", sessionObj))
                 .doOnError(err -> log.error("Redis读取异常: {}", err.getMessage(), err))
                 .flatMap(sessionObj -> {
                     // session 存在，解析并注入请求头
@@ -114,11 +120,10 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                                 .header("X-User-Role", role)
                                 .build();
 
-                        // 自动续期会话
-                        reactiveRedisTemplate.expire(sessionKey, Duration.ofMinutes(sessionExpireMinutes))
-                                .subscribe();
-
-                        return chain.filter(exchange.mutate().request(newRequest).build());
+                        // 自动续期必须处于同一响应式链中，避免独立 subscribe 丢失错误和上下文。
+                        return reactiveRedisTemplate.expire(
+                                        sessionKey, Duration.ofMinutes(sessionExpireMinutes))
+                                .then(chain.filter(exchange.mutate().request(newRequest).build()));
                     } else {
                         log.warn("Session 数据格式异常: {}, 实际类型: {}", path, sessionObj.getClass().getName());
                         return writeUnauthorizedResponse(exchange, "会话数据异常，请重新登录");
@@ -135,6 +140,9 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
      * 判断请求路径是否为管理端接口
      */
     private boolean isAdminPath(String path) {
+        if (path.startsWith("/api/v1/admin/")) {
+            return true;
+        }
         for (String adminPath : adminPaths) {
             if (path.startsWith(adminPath)) {
                 return true;
@@ -155,6 +163,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
         R<Void> result = R.forbidden(message);
+        result.setTraceId(exchange.getRequest().getHeaders().getFirst(TraceIdFilter.TRACE_ID_HEADER));
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(result);
             DataBufferFactory bufferFactory = response.bufferFactory();
@@ -178,6 +187,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
         R<Void> result = R.unauthorized(message);
+        result.setTraceId(exchange.getRequest().getHeaders().getFirst(TraceIdFilter.TRACE_ID_HEADER));
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(result);
             DataBufferFactory bufferFactory = response.bufferFactory();

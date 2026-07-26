@@ -25,6 +25,9 @@ public class SysMessage {
 
     private Long bizId;
 
+    /** 业务幂等键，由消费者按接收人、类型和业务对象稳定生成。 */
+    private String messageKey;
+
     private Boolean isRead;
 
     @TableField(fill = FieldFill.INSERT)

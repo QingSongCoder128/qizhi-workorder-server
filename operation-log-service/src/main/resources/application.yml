@@ -1,0 +1,15 @@
+server:
+  port: 10008
+
+spring:
+  application:
+    name: operation-log-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never

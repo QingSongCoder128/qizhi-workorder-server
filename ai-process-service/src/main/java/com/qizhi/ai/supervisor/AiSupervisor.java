@@ -34,21 +34,24 @@ public class AiSupervisor {
      * @return true=获取成功可以执行, false=超过并发限制
      */
     public boolean tryAcquire() {
-        int current = runningTasks.get();
-        if (current >= maxConcurrent) {
-            log.warn("AI并发已满: running={}, max={}, 任务将排队", current, maxConcurrent);
-            return false;
+        while (true) {
+            int current = runningTasks.get();
+            if (current >= maxConcurrent) {
+                log.warn("AI并发已满: running={}, max={}, 任务将排队", current, maxConcurrent);
+                return false;
+            }
+            if (runningTasks.compareAndSet(current, current + 1)) {
+                log.debug("AI任务许可获取: running={}/{}", current + 1, maxConcurrent);
+                return true;
+            }
         }
-        runningTasks.incrementAndGet();
-        log.debug("AI任务许可获取: running={}/{}", runningTasks.get(), maxConcurrent);
-        return true;
     }
 
     /**
      * 释放执行许可（任务完成后调用）
      */
     public void release() {
-        int after = runningTasks.decrementAndGet();
+        int after = runningTasks.updateAndGet(current -> Math.max(0, current - 1));
         log.debug("AI任务许可释放: running={}/{}", after, maxConcurrent);
     }
 

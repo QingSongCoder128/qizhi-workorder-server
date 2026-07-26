@@ -64,7 +64,8 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         // 2. 缓存未命中，通过 Feign 调用 work-order-service 实时聚合
         try {
-            R<Map<String, Object>> response = workOrderFeignClient.getStats();
+            R<Map<String, Object>> response = workOrderFeignClient.getStats(
+                    deptCode, startDate, endDate, workType);
             if (response != null && response.getCode() == 200 && response.getData() != null) {
                 Map<String, Object> dashboard = response.getData();
                 // 判断是否为空数据

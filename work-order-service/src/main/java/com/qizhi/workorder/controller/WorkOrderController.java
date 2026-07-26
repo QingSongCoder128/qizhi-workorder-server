@@ -136,8 +136,12 @@ public class WorkOrderController {
      */
     @Operation(summary = "工单统计数据（供 Feign 调用）")
     @GetMapping("/stats")
-    public R<Map<String, Object>> stats() {
-        return R.ok(workOrderService.getStats());
+    public R<Map<String, Object>> stats(
+            @RequestParam(required = false) String deptCode,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String workType) {
+        return R.ok(workOrderService.getStats(deptCode, startDate, endDate, workType));
     }
 
     /**

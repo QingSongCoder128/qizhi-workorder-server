@@ -62,8 +62,11 @@ public class AiProcessController {
             queuedResult.put("priorityReason", "AI服务繁忙，使用默认值");
             queuedResult.put("suggestion", "AI服务繁忙，建议人工审核");
             queuedResult.put("sensitiveWords", "");
+            queuedResult.put("pass", true);
             queuedResult.put("aiAbnormal", true);
             queuedResult.put("aiStatus", "QUEUED");
+            queuedResult.put("taskId", taskId);
+            queuedResult.put("agentResults", java.util.Collections.emptyList());
             return R.ok(queuedResult);
         }
 
@@ -87,6 +90,7 @@ public class AiProcessController {
                         agentResult.getData() != null ? agentResult.getData().toString() : "",
                         agentResult.getStatus(),
                         (int) agentResult.getDurationMs(),
+                        agentResult.getRetryCount(),
                         agentResult.getErrorMsg());
             }
 
@@ -98,8 +102,11 @@ public class AiProcessController {
             aggregated.put("priorityReason", context.getPriorityReason());
             aggregated.put("suggestion", context.getSuggestion());
             aggregated.put("sensitiveWords", context.getSensitiveWords());
+            aggregated.put("pass", context.getPass());
             aggregated.put("aiAbnormal", context.getAiAbnormal());
             aggregated.put("aiStatus", "COMPLETED");
+            aggregated.put("taskId", taskId);
+            aggregated.put("agentResults", context.getAgentResults());
 
             log.info("AI预处理完成: taskId={}, aiAbnormal={}", taskId, context.getAiAbnormal());
             return R.ok(aggregated);
@@ -142,7 +149,7 @@ public class AiProcessController {
      */
     private void saveLog(String taskId, Long workOrderId, String agentName,
                          String inputText, String outputText, String status,
-                         int durationMs, String errorMsg) {
+                         int durationMs, int retryCount, String errorMsg) {
         try {
             AiTaskLog logEntry = new AiTaskLog();
             logEntry.setTaskId(taskId);
@@ -152,7 +159,7 @@ public class AiProcessController {
             logEntry.setOutputText(outputText);
             logEntry.setStatus(status);
             logEntry.setDurationMs(durationMs);
-            logEntry.setRetryCount(0);
+            logEntry.setRetryCount(retryCount);
             logEntry.setErrorMsg(errorMsg);
             taskLogMapper.insert(logEntry);
         } catch (Exception e) {

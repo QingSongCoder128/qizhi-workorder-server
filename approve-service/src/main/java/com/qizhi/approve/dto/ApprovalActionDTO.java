@@ -9,8 +9,8 @@ import lombok.Data;
  * <p>
  * SRS 需求: AP-03 审批操作
  * 支持五种操作类型:
- *   - APPROVED: 通过（进入下一节点或完结）
- *   - REJECTED: 驳回（退回提交人）
+ *   - APPROVE: 通过（进入下一节点或完结）
+ *   - REJECT: 驳回（退回提交人）
  *   - TRANSFER: 转交（变更审批人）
  *   - ADD_NODE: 加签（插入新审批节点）
  *   - REMOVE_NODE: 减签（跳过后续节点）
@@ -24,7 +24,7 @@ public class ApprovalActionDTO {
     private Long approvalId;
 
     /**
-     * 操作类型: APPROVED / REJECTED / TRANSFER / ADD_NODE / REMOVE_NODE
+     * 操作类型: APPROVE / REJECT / TRANSFER / ADD_NODE / REMOVE_NODE
      */
     @NotBlank(message = "审批动作不能为空")
     private String action;

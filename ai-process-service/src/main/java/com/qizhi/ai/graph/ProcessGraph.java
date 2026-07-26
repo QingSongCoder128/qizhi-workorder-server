@@ -98,7 +98,11 @@ public class ProcessGraph {
                 }
 
                 long duration = System.currentTimeMillis() - start;
-                context.addResult(AgentResult.success(NODE_CATEGORY, result, duration));
+                AgentResult agentResult = Boolean.TRUE.equals(result.get("fallback"))
+                        ? AgentResult.fallback(NODE_CATEGORY, result, duration)
+                        : AgentResult.success(NODE_CATEGORY, result, duration);
+                agentResult.setRetryCount(attempt);
+                context.addResult(agentResult);
                 log.info("[CATEGORY] 成功: category={}, duration={}ms", context.getCategory(), duration);
                 return;
             } catch (Exception e) {
@@ -112,6 +116,7 @@ public class ProcessGraph {
         // 全部重试失败，使用降级结果
         long duration = System.currentTimeMillis() - start;
         AgentResult failedResult = AgentResult.failed(NODE_CATEGORY, duration, "AI分类全部失败");
+        failedResult.setRetryCount(maxRetry);
         context.addResult(failedResult);
         // 降级默认值
         context.setCategory("DEPT_IT");
@@ -141,7 +146,11 @@ public class ProcessGraph {
                 }
 
                 long duration = System.currentTimeMillis() - start;
-                context.addResult(AgentResult.success(NODE_RATING, result, duration));
+                AgentResult agentResult = Boolean.TRUE.equals(result.get("fallback"))
+                        ? AgentResult.fallback(NODE_RATING, result, duration)
+                        : AgentResult.success(NODE_RATING, result, duration);
+                agentResult.setRetryCount(attempt);
+                context.addResult(agentResult);
                 log.info("[RATING] 成功: priority={}, duration={}ms", context.getPriority(), duration);
                 return;
             } catch (Exception e) {
@@ -155,6 +164,7 @@ public class ProcessGraph {
         // 全部重试失败，使用降级结果
         long duration = System.currentTimeMillis() - start;
         AgentResult failedResult = AgentResult.failed(NODE_RATING, duration, "AI评级全部失败");
+        failedResult.setRetryCount(maxRetry);
         context.addResult(failedResult);
         context.setPriority(Boolean.TRUE.equals(context.getUrgent()) ? "URGENT" : "NORMAL");
         context.setPriorityReason("AI异常，使用默认优先级");
@@ -184,7 +194,11 @@ public class ProcessGraph {
                 }
 
                 long duration = System.currentTimeMillis() - start;
-                context.addResult(AgentResult.success(NODE_PRE_AUDIT, result, duration));
+                AgentResult agentResult = Boolean.TRUE.equals(result.get("fallback"))
+                        ? AgentResult.fallback(NODE_PRE_AUDIT, result, duration)
+                        : AgentResult.success(NODE_PRE_AUDIT, result, duration);
+                agentResult.setRetryCount(attempt);
+                context.addResult(agentResult);
                 log.info("[PRE_AUDIT] 成功: pass={}, duration={}ms", context.getPass(), duration);
                 return;
             } catch (Exception e) {
@@ -198,6 +212,7 @@ public class ProcessGraph {
         // 全部重试失败，使用降级结果
         long duration = System.currentTimeMillis() - start;
         AgentResult failedResult = AgentResult.failed(NODE_PRE_AUDIT, duration, "AI预审全部失败");
+        failedResult.setRetryCount(maxRetry);
         context.addResult(failedResult);
         context.setSuggestion("AI预审异常，建议人工审核");
         context.setSensitiveWords("");

@@ -40,5 +40,9 @@ public interface WorkOrderFeignClient {
 
     /** 实时统计看板数据 */
     @GetMapping("/stats")
-    R<Map<String, Object>> getStats();
+    R<Map<String, Object>> getStats(
+            @RequestParam(value = "deptCode", required = false) String deptCode,
+            @RequestParam(value = "startDate", required = false) String startDate,
+            @RequestParam(value = "endDate", required = false) String endDate,
+            @RequestParam(value = "workType", required = false) String workType);
 }

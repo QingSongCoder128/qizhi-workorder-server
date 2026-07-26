@@ -14,6 +14,7 @@ import com.qizhi.workorder.entity.WorkOrderHistory;
 import com.qizhi.workorder.feign.AiProcessFeignClient;
 import com.qizhi.workorder.feign.ApproveFeignClient;
 import com.qizhi.workorder.feign.MessageFeignClient;
+import com.qizhi.workorder.feign.OperationLogFeignClient;
 import com.qizhi.workorder.mapper.WorkOrderAttachmentMapper;
 import com.qizhi.workorder.mapper.WorkOrderHistoryMapper;
 import com.qizhi.workorder.mapper.WorkOrderMapper;
@@ -62,6 +63,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final AiProcessFeignClient aiProcessFeignClient;
     private final ApproveFeignClient approveFeignClient;
     private final MessageFeignClient messageFeignClient;
+    private final OperationLogFeignClient operationLogFeignClient;
     private final RedisUtil redisUtil;
 
     /** 分布式锁过期时间（秒），从 Nacos 读取，默认 30 */
@@ -75,6 +77,18 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     /** 工单序列号过期时间（秒），从 Nacos 读取，默认 2 天 */
     @Value("${workorder.seq-expire-seconds:172800}")
     private int seqExpireSeconds;
+
+    /** 单张工单最大附件数 */
+    @Value("${workorder.attachment.max-files:5}")
+    private int maxAttachmentFiles;
+
+    /** 单附件最大字节数，默认 5MB */
+    @Value("${workorder.attachment.max-size-bytes:5242880}")
+    private long maxAttachmentSize;
+
+    /** 允许的附件扩展名 */
+    @Value("#{'${workorder.attachment.allowed-extensions:jpg,jpeg,png,pdf}'.split(',')}")
+    private List<String> allowedAttachmentExtensions;
 
     /** 超时阈值-加急（分钟），从 Nacos 读取，默认 60 */
     @Value("${workorder.timeout.urgent-minutes:60}")
@@ -141,6 +155,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      */
     @Transactional(rollbackFor = Exception.class)
     public WorkOrder saveOrder(WorkOrderSubmitDTO dto, Long userId, String username) {
+        validateAttachmentMetadata(dto.getAttachments());
         String orderNo = generateOrderNo();
 
         WorkOrder order = new WorkOrder();
@@ -260,6 +275,20 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         var result = approveFeignClient.createApproval(approveRequest);
         if (result == null || result.getCode() != 200) {
             throw new BusinessException("审批单创建失败，全局事务回滚");
+        }
+
+        // ---- operation-log-service 第三事务分支：写入操作日志 ----
+        Map<String, Object> logRequest = new HashMap<>();
+        logRequest.put("userId", userId);
+        logRequest.put("userName", username);
+        logRequest.put("module", "WORK_ORDER");
+        logRequest.put("action", "SUBMIT");
+        logRequest.put("targetType", "WORK_ORDER");
+        logRequest.put("targetId", order.getId());
+        logRequest.put("detail", "提交工单并创建审批流程: " + order.getOrderNo());
+        var logResult = operationLogFeignClient.create(logRequest);
+        if (logResult == null || logResult.getCode() != 200) {
+            throw new BusinessException("操作日志写入失败，全局事务回滚");
         }
 
         log.info("[Seata] 全局事务提交成功: workOrderId={}", order.getId());
@@ -511,8 +540,24 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      * 直接从 work_order 表聚合，返回前端期望的格式
      */
     @Override
-    public Map<String, Object> getStats() {
-        List<WorkOrder> allOrders = workOrderMapper.selectList(new LambdaQueryWrapper<>());
+    public Map<String, Object> getStats(String deptCode, String startDate, String endDate, String workType) {
+        LambdaQueryWrapper<WorkOrder> statsQuery = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(deptCode)) {
+            statsQuery.eq(WorkOrder::getDepartmentCode, deptCode);
+        }
+        if (StringUtils.hasText(workType)) {
+            statsQuery.eq(WorkOrder::getType, workType);
+        }
+        DateTimeFormatter statsDateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        if (StringUtils.hasText(startDate)) {
+            statsQuery.ge(WorkOrder::getCreatedAt,
+                    LocalDate.parse(startDate, statsDateFormat).atStartOfDay());
+        }
+        if (StringUtils.hasText(endDate)) {
+            statsQuery.lt(WorkOrder::getCreatedAt,
+                    LocalDate.parse(endDate, statsDateFormat).plusDays(1).atStartOfDay());
+        }
+        List<WorkOrder> allOrders = workOrderMapper.selectList(statsQuery);
 
         int totalCount = allOrders.size();
         // 待处理总量（工单状态 PENDING_AI / PENDING_APPROVE / APPROVING）
@@ -673,6 +718,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      */
     @Override
     public Map<String, String> uploadAttachment(org.springframework.web.multipart.MultipartFile file) {
+        validateUpload(file);
         try {
             String uploadDir = System.getProperty("user.dir") + "/uploads";
             java.io.File dir = new java.io.File(uploadDir);
@@ -681,7 +727,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             }
             String originalName = file.getOriginalFilename();
             String ext = (originalName != null && originalName.contains("."))
-                    ? originalName.substring(originalName.lastIndexOf(".")) : "";
+                    ? originalName.substring(originalName.lastIndexOf(".")).toLowerCase(Locale.ROOT) : "";
             String fileName = java.util.UUID.randomUUID().toString().replace("-", "") + ext;
             java.io.File dest = new java.io.File(dir, fileName);
             file.transferTo(dest);
@@ -694,6 +740,60 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             log.error("附件上传失败: {}", e.getMessage(), e);
             throw new BusinessException("附件上传失败");
         }
+    }
+
+    private void validateAttachmentMetadata(List<WorkOrderSubmitDTO.AttachmentInfo> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return;
+        }
+        if (attachments.size() > maxAttachmentFiles) {
+            throw new BusinessException("附件数量不能超过" + maxAttachmentFiles + "个");
+        }
+        for (WorkOrderSubmitDTO.AttachmentInfo attachment : attachments) {
+            String extension = extensionOf(attachment.getFileName());
+            if (!isAllowedExtension(extension)) {
+                throw new BusinessException("不支持的附件类型，仅允许 JPG、PNG 和 PDF");
+            }
+            if (attachment.getFileSize() == null || attachment.getFileSize() <= 0
+                    || attachment.getFileSize() > maxAttachmentSize) {
+                throw new BusinessException("单个附件大小不能超过5MB");
+            }
+        }
+    }
+
+    private void validateUpload(org.springframework.web.multipart.MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("附件不能为空");
+        }
+        if (file.getSize() > maxAttachmentSize) {
+            throw new BusinessException("单个附件大小不能超过5MB");
+        }
+        String extension = extensionOf(file.getOriginalFilename());
+        if (!isAllowedExtension(extension)) {
+            throw new BusinessException("不支持的附件类型，仅允许 JPG、PNG 和 PDF");
+        }
+        String contentType = file.getContentType() == null
+                ? "" : file.getContentType().toLowerCase(Locale.ROOT);
+        boolean validMime = contentType.equals("image/jpeg")
+                || contentType.equals("image/png")
+                || contentType.equals("application/pdf");
+        if (!validMime) {
+            throw new BusinessException("附件内容类型不合法");
+        }
+    }
+
+    private boolean isAllowedExtension(String extension) {
+        return allowedAttachmentExtensions.stream()
+                .map(String::trim)
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .anyMatch(extension::equals);
+    }
+
+    private String extensionOf(String fileName) {
+        if (fileName == null || !fileName.contains(".")) {
+            return "";
+        }
+        return fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
     }
 
     @Override

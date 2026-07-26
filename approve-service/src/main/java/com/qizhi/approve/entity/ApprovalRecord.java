@@ -45,7 +45,7 @@ public class ApprovalRecord {
     /** 实际操作人姓名 */
     private String operatorName;
 
-    /** 操作类型：APPROVED/REJECTED/TRANSFER/ADD_NODE/REMOVE_NODE */
+    /** 操作类型：APPROVE/REJECT/TRANSFER/ADD_NODE/REMOVE_NODE */
     private String action;
 
     /** 审批意见 */

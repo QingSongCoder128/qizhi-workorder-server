@@ -32,7 +32,7 @@ import java.util.List;
  * 所有阈值均从 Nacos 配置中心读取，支持热更新（@RefreshScope）。
  * </p>
  * <p>
- * 执行顺序: order = -200（在 AuthGlobalFilter(-100) 之前执行）
+ * 执行顺序: order = -90（在 AuthGlobalFilter(-100) 完成会话解析之后执行）
  * 策略:
  *   1. 所有请求先做 IP 维度限流
  *   2. 白名单路径（登录/注册）跳过用户维度限流
@@ -208,6 +208,7 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
         R<Void> result = R.tooMany(message);
+        result.setTraceId(exchange.getRequest().getHeaders().getFirst(TraceIdFilter.TRACE_ID_HEADER));
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(result);
             DataBufferFactory bufferFactory = response.bufferFactory();
@@ -220,7 +221,8 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        // 在 AuthGlobalFilter(-100) 之前执行，确保限流优先于鉴权
-        return -200;
+        // 必须在鉴权后执行，才能使用网关注入的 X-User-Id 做账号维度限流。
+        // 登录等白名单请求仍会经过 IP 维度限流。
+        return -90;
     }
 }

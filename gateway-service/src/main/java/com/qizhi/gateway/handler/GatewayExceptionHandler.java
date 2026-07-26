@@ -3,6 +3,7 @@ package com.qizhi.gateway.handler;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qizhi.common.core.result.R;
+import com.qizhi.gateway.filter.TraceIdFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.web.reactive.error.ErrorWebExceptionHandler;
 import org.springframework.core.annotation.Order;
@@ -68,6 +69,7 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
 
         // 构建统一 JSON 响应体
         R<Void> result = R.fail(status.value(), message);
+        result.setTraceId(exchange.getRequest().getHeaders().getFirst(TraceIdFilter.TRACE_ID_HEADER));
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(result);
             DataBufferFactory bufferFactory = response.bufferFactory();

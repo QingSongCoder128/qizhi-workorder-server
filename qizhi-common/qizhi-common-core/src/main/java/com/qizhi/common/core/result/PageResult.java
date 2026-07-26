@@ -16,7 +16,7 @@ import java.util.List;
 public class PageResult<T> implements Serializable {
 
     /** 当前页码 */
-    private Long current;
+    private Long page;
 
     /** 每页条数 */
     private Long size;
@@ -27,7 +27,7 @@ public class PageResult<T> implements Serializable {
     /** 数据列表 */
     private List<T> records;
 
-    public static <T> PageResult<T> of(Long current, Long size, Long total, List<T> records) {
-        return new PageResult<>(current, size, total, records);
+    public static <T> PageResult<T> of(Long page, Long size, Long total, List<T> records) {
+        return new PageResult<>(page, size, total, records);
     }
 }

@@ -137,7 +137,7 @@ public class ApproveController {
                            @RequestHeader(value = "X-Username", required = false) String username) {
         ApprovalActionDTO dto = new ApprovalActionDTO();
         dto.setApprovalId(id);
-        dto.setAction("APPROVED");
+        dto.setAction("APPROVE");
         dto.setOpinion(body.get("comment"));
         approveService.action(dto, userId, username);
         return R.ok();
@@ -155,7 +155,7 @@ public class ApproveController {
                           @RequestHeader(value = "X-Username", required = false) String username) {
         ApprovalActionDTO dto = new ApprovalActionDTO();
         dto.setApprovalId(id);
-        dto.setAction("REJECTED");
+        dto.setAction("REJECT");
         dto.setOpinion(body.get("comment"));
         approveService.action(dto, userId, username);
         return R.ok();

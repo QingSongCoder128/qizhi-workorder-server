@@ -18,3 +18,12 @@ springdoc:
     enabled: true
 knife4j:
   enable: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never

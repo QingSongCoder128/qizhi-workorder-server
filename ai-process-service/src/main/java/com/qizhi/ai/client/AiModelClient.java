@@ -88,7 +88,9 @@ public class AiModelClient {
                     apiUrl, HttpMethod.POST, entity, String.class);
 
             String responseBody = response.getBody();
-            log.info("AI模型原始响应: {}", responseBody);
+            if (responseBody == null || responseBody.isBlank()) {
+                throw new IllegalStateException("AI 模型返回空响应");
+            }
 
             JsonNode root = objectMapper.readTree(responseBody);
             String content = root.path("choices").path(0).path("message").path("content").asText();
@@ -112,7 +114,8 @@ public class AiModelClient {
         try {
             return objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
-            log.error("解析AI返回JSON失败: content={}, error={}", content, e.getMessage());
+            log.error("解析AI返回JSON失败: contentLength={}, error={}",
+                    content != null ? content.length() : 0, e.getMessage());
             // 尝试从 content 中提取 JSON 部分
             int jsonStart = content.indexOf('{');
             int jsonEnd = content.lastIndexOf('}');
@@ -125,7 +128,7 @@ public class AiModelClient {
                     log.error("二次解析也失败: {}", e2.getMessage());
                 }
             }
-            throw new RuntimeException("无法解析AI返回结果为JSON: " + content, e);
+            throw new RuntimeException("无法解析AI返回结果为JSON", e);
         }
     }
 }
