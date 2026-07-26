@@ -104,6 +104,15 @@ public class ApproveController {
         return R.ok(approveService.getRecords(approvalId));
     }
 
+    /**
+     * 根据工单 ID 查询审批记录（供 work-order-service Feign 调用，展示审批时间线）
+     */
+    @Operation(summary = "按工单ID查询审批记录（供 Feign 调用）")
+    @GetMapping("/by-work-order/{workOrderId}/records")
+    public R<List<ApprovalRecord>> recordsByWorkOrderId(@PathVariable Long workOrderId) {
+        return R.ok(approveService.getRecordsByWorkOrderId(workOrderId));
+    }
+
     // ==================== 前端适配端点 ====================
 
     /**

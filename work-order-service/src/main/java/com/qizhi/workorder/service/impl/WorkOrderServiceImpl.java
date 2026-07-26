@@ -115,27 +115,24 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             throw new BusinessException(409, "请勿短时间重复提交同类工单");
         }
 
-        try {
-            // ---- 第一阶段: 本地事务保存工单基础数据 ----
-            WorkOrder order = saveOrder(dto, userId, username);
+        // ---- 第一阶段: 本地事务保存工单基础数据 ----
+        WorkOrder order = saveOrder(dto, userId, username);
 
-            // ---- 第二阶段: AI 智能预处理（同步阻塞，失败不阻断流程） ----
-            processAI(order);
+        // ---- 第二阶段: AI 智能预处理（同步阻塞，失败不阻断流程） ----
+        processAI(order);
 
-            // ---- 第三阶段: Seata 分布式事务（更新状态 + 创建审批单，跨服务原子操作） ----
-            // 通过 self 代理调用，确保 @GlobalTransactional 注解生效
-            self.updateStatusAndCreateApproval(order, userId, username);
+        // ---- 第三阶段: Seata 分布式事务（更新状态 + 创建审批单，跨服务原子操作） ----
+        // 通过 self 代理调用，确保 @GlobalTransactional 注解生效
+        self.updateStatusAndCreateApproval(order, userId, username);
 
-            // ---- 第四阶段: 异步通知（事务外执行，失败不影响主流程） ----
-            sendSubmitNotification(order, userId);
+        // ---- 第四阶段: 异步通知（事务外执行，失败不影响主流程） ----
+        sendSubmitNotification(order, userId);
 
-            // ---- 第五阶段: 触发延迟督办（MS-04/MS-05，根据优先级设置不同延迟时长） ----
-            sendDelayRemind(order);
+        // ---- 第五阶段: 触发延迟督办（MS-04/MS-05，根据优先级设置不同延迟时长） ----
+        sendDelayRemind(order);
 
-            return order;
-        } finally {
-            redisUtil.unlock(lockKey);
-        }
+        // 注意: 不主动释放锁，让其自然过期（30秒），防止短时间内重复提交同类工单
+        return order;
     }
 
     /**
@@ -198,8 +195,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
             var aiResult = aiProcessFeignClient.process(aiRequest);
             if (aiResult != null && aiResult.getCode() == 200 && aiResult.getData() != null) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> aiData = (Map<String, Object>) aiResult.getData();
+                Map<String, Object> aiData = aiResult.getData();
                 order.setAiCategory(String.valueOf(aiData.getOrDefault("category", "")));
                 order.setAiConfidence(aiData.get("confidence") != null ?
                         Double.parseDouble(String.valueOf(aiData.get("confidence"))) : null);
@@ -216,7 +212,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             }
         } catch (Exception e) {
             // AI 异常不阻断工单流转，标记异常供审批人参考
-            log.error("AI 预处理调用失败，工单继续流转: {}", e.getMessage());
+            log.error("AI 预处理调用失败，工单继续流转: type={}, msg={}", e.getClass().getName(), e.getMessage(), e);
             order.setAiAbnormal(true);
         }
     }
@@ -377,6 +373,25 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                         .build())
                 .collect(Collectors.toList());
 
+        // 审批时间线：Feign 调用 approve-service 获取审批记录
+        List<WorkOrderDetailVO.ApprovalTimeline> timelineList = new ArrayList<>();
+        try {
+            R<List<Map<String, Object>>> recordsResp = approveFeignClient.getRecordsByWorkOrderId(id);
+            if (recordsResp != null && recordsResp.getCode() == 200 && recordsResp.getData() != null) {
+                for (Map<String, Object> rec : recordsResp.getData()) {
+                    timelineList.add(WorkOrderDetailVO.ApprovalTimeline.builder()
+                            .nodeName(rec.get("nodeName") != null ? String.valueOf(rec.get("nodeName")) : null)
+                            .action(rec.get("action") != null ? String.valueOf(rec.get("action")) : null)
+                            .operatorName(rec.get("operatorName") != null ? String.valueOf(rec.get("operatorName")) : null)
+                            .opinion(rec.get("opinion") != null ? String.valueOf(rec.get("opinion")) : null)
+                            .operatedAt(rec.get("operatedAt") != null ? LocalDateTime.parse(String.valueOf(rec.get("operatedAt")).replace("Z", "")) : null)
+                            .build());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取审批时间线失败: {}", e.getMessage());
+        }
+
         return WorkOrderDetailVO.builder()
                 .id(order.getId())
                 .orderNo(order.getOrderNo())
@@ -396,9 +411,12 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .aiPriorityReason(order.getAiPriorityReason())
                 .aiSuggestion(order.getAiSuggestion())
                 .aiSensitiveWords(order.getAiSensitiveWords())
+                .aiAbnormal(order.getAiAbnormal())
+                .seataXid(order.getSeataXid())
                 .versionNo(order.getVersionNo())
                 .createdAt(order.getCreatedAt())
                 .completedAt(order.getCompletedAt())
+                .approvalNodes(timelineList)
                 .statusHistory(historyList)
                 .build();
     }

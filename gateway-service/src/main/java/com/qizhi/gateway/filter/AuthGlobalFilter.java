@@ -50,7 +50,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
      * SRS 需求: GW-14 解析会话中权限集合，拦截无权限接口访问
      * 从 Nacos 读取，支持热更新
      */
-    @Value("#{'${gateway.admin-paths:/api/v1/user/list,/api/v1/user/create,/api/v1/dept,/api/v1/role,/api/v1/approve/template,/api/v1/message/dlq,/api/v1/message/dead-letter,/api/v1/stats/refresh}'.split(',')}")
+    @Value("#{'${gateway.admin-paths:/api/v1/user/list,/api/v1/user/create,/api/v1/dept,/api/v1/role,/api/v1/approve/template,/api/v1/message/dlq,/api/v1/message/dead-letter,/api/v1/stats/refresh,/api/v1/workorder/list,/api/v1/workorder/export-list}'.split(',')}")
     private List<String> adminPaths;
 
     /** 会话 Redis Key 前缀 */

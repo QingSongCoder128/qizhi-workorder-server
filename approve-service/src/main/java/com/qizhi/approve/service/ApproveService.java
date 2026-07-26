@@ -54,6 +54,9 @@ public interface ApproveService {
     /** 获取审批单的全部审批记录（节点列表） */
     List<ApprovalRecord> getRecords(Long approvalId);
 
+    /** 根据工单 ID 查询审批记录（供 Feign 调用） */
+    List<ApprovalRecord> getRecordsByWorkOrderId(Long workOrderId);
+
     /**
      * 审批详情（前端适配）
      * 返回 {workOrder: {orderNo, title, ...}, nodes: [ApprovalRecord...] }

@@ -294,6 +294,20 @@ public class ApproveServiceImpl implements ApproveService {
                         .orderByAsc(ApprovalRecord::getNodeOrder));
     }
 
+    @Override
+    public List<ApprovalRecord> getRecordsByWorkOrderId(Long workOrderId) {
+        // 先查找该工单对应的审批实例
+        ApprovalInstance instance = instanceMapper.selectOne(
+                new LambdaQueryWrapper<ApprovalInstance>()
+                        .eq(ApprovalInstance::getWorkOrderId, workOrderId)
+                        .orderByDesc(ApprovalInstance::getCreatedAt)
+                        .last("LIMIT 1"));
+        if (instance == null) {
+            return java.util.Collections.emptyList();
+        }
+        return getRecords(instance.getId());
+    }
+
     /**
      * 审批详情（前端适配）
      * 返回 {workOrder: {...}, nodes: [...]}
@@ -422,10 +436,17 @@ public class ApproveServiceImpl implements ApproveService {
                 instance.setCurrentNode(nextRecord.getNodeName());
                 instance.setApproverId(nextRecord.getApproverId());
                 instance.setStatus("APPROVING");
+                // 回调 work-order-service 更新工单状态为 APPROVING（审批中）
+                updateWorkOrderStatus(instance.getWorkOrderId(), "APPROVING", "审批流转中，当前节点: " + nextRecord.getNodeName());
             } else {
                 // 无后续有效节点，审批完结
                 instance.setStatus("APPROVED");
                 log.info("无后续有效节点，审批完结: approvalId={}", instance.getId());
+                // 回调 work-order-service 更新工单状态为 COMPLETED
+                updateWorkOrderStatus(instance.getWorkOrderId(), "COMPLETED", "审批全部通过，工单完结");
+                sendNotification(instance.getSubmitterId(), "审批结果通知",
+                        "您的工单[" + instance.getOrderNo() + "]已通过全部审批",
+                        "APPROVE_NOTIFY", instance.getWorkOrderId());
             }
             instanceMapper.updateById(instance);
             log.info("进入下一级审批: approvalId={}, nextOrder={}", instance.getId(),

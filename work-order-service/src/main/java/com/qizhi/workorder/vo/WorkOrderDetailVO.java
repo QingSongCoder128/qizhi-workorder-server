@@ -34,6 +34,10 @@ public class WorkOrderDetailVO {
     private String aiPriorityReason;
     private String aiSuggestion;
     private String aiSensitiveWords;
+    private Boolean aiAbnormal;
+
+    // Seata 分布式事务 XID
+    private String seataXid;
 
     private Integer versionNo;
     private LocalDateTime createdAt;

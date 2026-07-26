@@ -24,6 +24,22 @@ public class GlobalExceptionHandler {
         return R.fail(e.getCode(), e.getMessage());
     }
 
+    /** Seata/AOP 包装的异常（递归解包 BusinessException） */
+    @ExceptionHandler(RuntimeException.class)
+    public R<Void> handleRuntimeException(RuntimeException e) {
+        // Seata AdapterInvocationWrapper / Spring AOP 可能多层包装 BusinessException
+        Throwable cause = e;
+        for (int i = 0; i < 5 && cause != null; i++) {
+            if (cause instanceof BusinessException be) {
+                log.warn("业务异常(包装解包): {}", be.getMessage());
+                return R.fail(be.getCode(), be.getMessage());
+            }
+            cause = cause.getCause();
+        }
+        log.error("系统异常: type={}, msg={}", e.getClass().getName(), e.getMessage(), e);
+        return R.fail("系统内部错误，请稍后再试");
+    }
+
     /** 参数校验异常 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public R<Void> handleValidException(MethodArgumentNotValidException e) {
