@@ -69,7 +69,7 @@ public class UserServiceImpl implements UserService {
     private int loginLockMinutes;
 
     /** 重置密码默认值，从 Nacos 读取 */
-    @Value("${user.default-password:Qizhi@123}")
+    @Value("${user.default-password:Admin123}")
     private String defaultPassword;
 
     @Override
@@ -206,13 +206,17 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode) {
+    public PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode, String deptCode) {
         Page<SysUser> page = new Page<>(current, size);
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(SysUser::getUsername, keyword)
                     .or().like(SysUser::getRealName, keyword)
                     .or().like(SysUser::getPhone, keyword));
+        }
+        // 部门筛选
+        if (StringUtils.hasText(deptCode)) {
+            wrapper.eq(SysUser::getDeptCode, deptCode);
         }
         // 角色筛选：通过 sys_user_role 关联表查找拥有指定角色的用户 ID
         if (StringUtils.hasText(roleCode)) {
@@ -466,6 +470,64 @@ public class UserServiceImpl implements UserService {
                         .in(SysUser::getId, userIds)
                         .eq(SysUser::getStatus, "ENABLED"));
         return users.stream().map(this::toUserVO).collect(Collectors.toList());
+    }
+
+    @Override
+    public Map<String, Long> getUserStats() {
+        Long total = userMapper.selectCount(null);
+        Long enabled = userMapper.selectCount(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getStatus, "ENABLED"));
+        Long disabled = userMapper.selectCount(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getStatus, "DISABLED"));
+        Map<String, Long> stats = new HashMap<>();
+        stats.put("total", total);
+        stats.put("enabled", enabled);
+        stats.put("disabled", disabled);
+        return stats;
+    }
+
+    @Override
+    public List<UserVO> exportUsers(String keyword, String roleCode, String deptCode) {
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(SysUser::getUsername, keyword)
+                    .or().like(SysUser::getRealName, keyword)
+                    .or().like(SysUser::getPhone, keyword));
+        }
+        if (StringUtils.hasText(deptCode)) {
+            wrapper.eq(SysUser::getDeptCode, deptCode);
+        }
+        if (StringUtils.hasText(roleCode)) {
+            SysRole role = roleMapper.selectOne(
+                    new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, roleCode));
+            if (role == null) {
+                return Collections.emptyList();
+            }
+            List<SysUserRole> userRoles = userRoleMapper.selectList(
+                    new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getRoleId, role.getId()));
+            if (userRoles.isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<Long> userIds = userRoles.stream().map(SysUserRole::getUserId).collect(Collectors.toList());
+            wrapper.in(SysUser::getId, userIds);
+        }
+        wrapper.orderByDesc(SysUser::getCreatedAt);
+        List<SysUser> users = userMapper.selectList(wrapper);
+        return users.stream().map(this::toUserVO).collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchOperate(List<Long> ids, String action) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要操作的用户");
+        }
+        switch (action) {
+            case "enable" -> ids.forEach(id -> setStatus(id, "ENABLED"));
+            case "disable" -> ids.forEach(id -> setStatus(id, "DISABLED"));
+            case "resetPassword" -> ids.forEach(this::resetPassword);
+            default -> throw new BusinessException("不支持的操作: " + action);
+        }
     }
 
     private List<String> getPermissions(Long userId) {

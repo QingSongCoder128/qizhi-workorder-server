@@ -18,7 +18,7 @@ public interface UserService {
 
     UserVO getCurrentUser(String sessionId);
 
-    PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode);
+    PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode, String deptCode);
 
     void createUser(UserCreateDTO dto);
 
@@ -38,4 +38,13 @@ public interface UserService {
 
     /** 按角色编码查询启用状态的用户列表 */
     List<UserVO> getUsersByRole(String roleCode);
+
+    /** 用户统计（总数/启用数/审批人数） */
+    Map<String, Long> getUserStats();
+
+    /** 导出用户列表（全量，支持筛选） */
+    List<UserVO> exportUsers(String keyword, String roleCode, String deptCode);
+
+    /** 批量操作（启用/停用/重置密码） */
+    void batchOperate(List<Long> ids, String action);
 }

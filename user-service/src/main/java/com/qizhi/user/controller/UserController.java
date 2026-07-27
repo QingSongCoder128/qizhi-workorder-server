@@ -52,10 +52,11 @@ public class UserController {
                                       @RequestParam(required = false) Integer page,
                                       @RequestParam(required = false) Integer pageSize,
                                       @RequestParam(required = false) String keyword,
-                                      @RequestParam(required = false) String roleCode) {
+                                      @RequestParam(required = false) String roleCode,
+                                      @RequestParam(required = false) String deptCode) {
         int c = (current != null) ? current : (page != null ? page : 1);
         int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
-        return R.ok(userService.getUserPage(c, s, keyword, roleCode));
+        return R.ok(userService.getUserPage(c, s, keyword, roleCode, deptCode));
     }
 
     @Operation(summary = "新增用户")
@@ -149,6 +150,64 @@ public class UserController {
     @GetMapping("/by-role")
     public R<List<UserVO>> getByRole(@RequestParam String roleCode) {
         return R.ok(userService.getUsersByRole(roleCode));
+    }
+
+    @Operation(summary = "用户统计")
+    @GetMapping("/stats")
+    public R<Map<String, Long>> stats() {
+        return R.ok(userService.getUserStats());
+    }
+
+    @Operation(summary = "导出用户列表")
+    @GetMapping("/export")
+    public void exportUsers(@RequestParam(required = false) String keyword,
+                            @RequestParam(required = false) String roleCode,
+                            @RequestParam(required = false) String deptCode,
+                            HttpServletResponse response) {
+        List<UserVO> users = userService.exportUsers(keyword, roleCode, deptCode);
+        try {
+            response.setContentType("text/csv; charset=UTF-8");
+            response.setHeader("Content-Disposition", "attachment; filename=users.csv");
+            // UTF-8 BOM for Excel compatibility
+            response.getOutputStream().write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+            StringBuilder sb = new StringBuilder();
+            sb.append("账号,姓名,部门,角色,手机号,邮箱,状态\n");
+            for (UserVO u : users) {
+                sb.append(csv(u.getUsername())).append(',');
+                sb.append(csv(u.getRealName())).append(',');
+                sb.append(csv(u.getDeptName())).append(',');
+                sb.append(csv(u.getRoleCode())).append(',');
+                sb.append(csv(u.getPhone())).append(',');
+                sb.append(csv(u.getEmail())).append(',');
+                sb.append("ENABLED".equals(u.getStatus()) ? "启用" : "禁用").append('\n');
+            }
+            response.getWriter().write(sb.toString());
+            response.getWriter().flush();
+        } catch (Exception e) {
+            throw new BusinessException("导出失败");
+        }
+    }
+
+    @Operation(summary = "批量操作")
+    @PutMapping("/batch")
+    public R<Void> batch(@RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        List<Number> rawIds = (List<Number>) body.get("ids");
+        String action = (String) body.get("action");
+        if (rawIds == null || rawIds.isEmpty() || action == null) {
+            return R.fail("参数不完整");
+        }
+        List<Long> ids = rawIds.stream().map(Number::longValue).toList();
+        userService.batchOperate(ids, action);
+        return R.ok();
+    }
+
+    private String csv(String value) {
+        if (value == null) return "";
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
     }
 
     /**
