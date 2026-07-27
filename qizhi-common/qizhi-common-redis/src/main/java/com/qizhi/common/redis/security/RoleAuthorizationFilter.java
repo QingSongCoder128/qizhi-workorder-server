@@ -101,10 +101,11 @@ public class RoleAuthorizationFilter extends OncePerRequestFilter {
         }
         // 部门管理
         if (path.startsWith("/api/v1/dept")) {
-            // 读取（GET）允许有 dept:manage 或 user:manage 权限的用户
-            if ("GET".equals(method)) {
-                return perms.contains("dept:manage") || perms.contains("user:manage");
+            // 部门列表/树读取：任何已认证用户均可访问（新建工单需选部门）
+            if ("GET".equals(method) && (path.equals("/api/v1/dept/list") || path.equals("/api/v1/dept/tree"))) {
+                return true;
             }
+            // 其他部门管理操作需要 dept:manage
             return perms.contains("dept:manage");
         }
         // 角色管理
