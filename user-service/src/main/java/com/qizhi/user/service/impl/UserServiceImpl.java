@@ -246,11 +246,20 @@ public class UserServiceImpl implements UserService {
         // 密码复杂度校验（SRS 安全性需求：至少8位，含大小写字母和数字）
         PasswordValidator.validate(dto.getPassword());
 
-        // 检查用户名唯一
+        // 检查用户名唯一（MySQL默认utf8mb4_general_ci不区分大小写）
         Long count = userMapper.selectCount(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, dto.getUsername()));
         if (count > 0) {
-            throw new BusinessException("用户名已存在");
+            throw new BusinessException("账号已存在（不区分大小写）");
+        }
+
+        // 检查手机号唯一
+        if (dto.getPhone() != null && !dto.getPhone().isBlank()) {
+            Long phoneCount = userMapper.selectCount(
+                    new LambdaQueryWrapper<SysUser>().eq(SysUser::getPhone, dto.getPhone()));
+            if (phoneCount > 0) {
+                throw new BusinessException("该手机号已被其他用户使用");
+            }
         }
 
         SysUser user = new SysUser();
@@ -528,6 +537,18 @@ public class UserServiceImpl implements UserService {
             case "resetPassword" -> ids.forEach(this::resetPassword);
             default -> throw new BusinessException("不支持的操作: " + action);
         }
+    }
+
+    @Override
+    public void deleteUser(Long id) {
+        SysUser user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if ("admin".equalsIgnoreCase(user.getUsername())) {
+            throw new BusinessException("不允许删除系统管理员账号");
+        }
+        userMapper.deleteById(id);
     }
 
     private List<String> getPermissions(Long userId) {

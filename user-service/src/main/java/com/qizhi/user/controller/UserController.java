@@ -168,8 +168,11 @@ public class UserController {
         try {
             response.setContentType("text/csv; charset=UTF-8");
             response.setHeader("Content-Disposition", "attachment; filename=users.csv");
-            // UTF-8 BOM for Excel compatibility
-            response.getOutputStream().write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+            response.setCharacterEncoding("UTF-8");
+            // 统一使用 OutputStream，避免 getWriter/getOutputStream 冲突
+            var out = response.getOutputStream();
+            // UTF-8 BOM for Excel/WPS compatibility
+            out.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
             StringBuilder sb = new StringBuilder();
             sb.append("账号,姓名,部门,角色,手机号,邮箱,状态\n");
             for (UserVO u : users) {
@@ -181,10 +184,10 @@ public class UserController {
                 sb.append(csv(u.getEmail())).append(',');
                 sb.append("ENABLED".equals(u.getStatus()) ? "启用" : "禁用").append('\n');
             }
-            response.getWriter().write(sb.toString());
-            response.getWriter().flush();
+            out.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
         } catch (Exception e) {
-            throw new BusinessException("导出失败");
+            throw new BusinessException("导出失败: " + e.getMessage());
         }
     }
 
@@ -199,6 +202,13 @@ public class UserController {
         }
         List<Long> ids = rawIds.stream().map(Number::longValue).toList();
         userService.batchOperate(ids, action);
+        return R.ok();
+    }
+
+    @Operation(summary = "删除用户")
+    @DeleteMapping("/{id}")
+    public R<Void> deleteUser(@PathVariable Long id) {
+        userService.deleteUser(id);
         return R.ok();
     }
 

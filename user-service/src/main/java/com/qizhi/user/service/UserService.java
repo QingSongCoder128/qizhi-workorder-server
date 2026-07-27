@@ -47,4 +47,7 @@ public interface UserService {
 
     /** 批量操作（启用/停用/重置密码） */
     void batchOperate(List<Long> ids, String action);
+
+    /** 删除用户 */
+    void deleteUser(Long id);
 }
