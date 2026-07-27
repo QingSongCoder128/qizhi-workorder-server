@@ -183,6 +183,10 @@ public class AiRuntimeConfigService {
 
     private static void putIfPresent(Map<String, Object> target, String key, Object value) {
         if (value != null && (!(value instanceof String string) || !string.isBlank())) {
+            // 跳过脱敏占位值（如 https://api.deepseek.com/***），避免覆盖真实配置
+            if (value instanceof String s && s.contains("***")) {
+                return;
+            }
             target.put(key, value);
         }
     }
