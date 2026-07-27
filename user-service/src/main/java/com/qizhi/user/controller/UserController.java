@@ -51,10 +51,11 @@ public class UserController {
                                       @RequestParam(required = false) Integer size,
                                       @RequestParam(required = false) Integer page,
                                       @RequestParam(required = false) Integer pageSize,
-                                      @RequestParam(required = false) String keyword) {
+                                      @RequestParam(required = false) String keyword,
+                                      @RequestParam(required = false) String roleCode) {
         int c = (current != null) ? current : (page != null ? page : 1);
         int s = (size != null) ? size : (pageSize != null ? pageSize : 10);
-        return R.ok(userService.getUserPage(c, s, keyword));
+        return R.ok(userService.getUserPage(c, s, keyword, roleCode));
     }
 
     @Operation(summary = "新增用户")

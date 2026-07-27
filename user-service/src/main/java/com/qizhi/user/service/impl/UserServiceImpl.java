@@ -206,13 +206,28 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword) {
+    public PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode) {
         Page<SysUser> page = new Page<>(current, size);
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(SysUser::getUsername, keyword)
                     .or().like(SysUser::getRealName, keyword)
                     .or().like(SysUser::getPhone, keyword));
+        }
+        // 角色筛选：通过 sys_user_role 关联表查找拥有指定角色的用户 ID
+        if (StringUtils.hasText(roleCode)) {
+            SysRole role = roleMapper.selectOne(
+                    new LambdaQueryWrapper<SysRole>().eq(SysRole::getRoleCode, roleCode));
+            if (role == null) {
+                return PageResult.of((long) current, (long) size, 0L, Collections.emptyList());
+            }
+            List<SysUserRole> userRoles = userRoleMapper.selectList(
+                    new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getRoleId, role.getId()));
+            if (userRoles.isEmpty()) {
+                return PageResult.of((long) current, (long) size, 0L, Collections.emptyList());
+            }
+            List<Long> userIds = userRoles.stream().map(SysUserRole::getUserId).collect(Collectors.toList());
+            wrapper.in(SysUser::getId, userIds);
         }
         wrapper.orderByDesc(SysUser::getCreatedAt);
         Page<SysUser> result = userMapper.selectPage(page, wrapper);

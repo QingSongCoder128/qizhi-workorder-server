@@ -18,7 +18,7 @@ public interface UserService {
 
     UserVO getCurrentUser(String sessionId);
 
-    PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword);
+    PageResult<UserVO> getUserPage(Integer current, Integer size, String keyword, String roleCode);
 
     void createUser(UserCreateDTO dto);
 
