@@ -381,7 +381,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     }
 
     @Override
-    public PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String keyword) {
+    public PageResult<WorkOrder> getAdminList(Integer current, Integer size, String status, String type, String priority, String keyword) {
         Page<WorkOrder> page = new Page<>(current, size);
         LambdaQueryWrapper<WorkOrder> wrapper = new LambdaQueryWrapper<>();
         if ("TIMEOUT".equals(status)) {
@@ -400,6 +400,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         }
         if (StringUtils.hasText(type)) {
             wrapper.eq(WorkOrder::getType, type);
+        }
+        if (StringUtils.hasText(priority)) {
+            wrapper.eq(WorkOrder::getPriority, priority);
         }
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(WorkOrder::getTitle, keyword)
