@@ -22,6 +22,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -107,10 +108,19 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                         String username = String.valueOf(sessionData.getOrDefault("username", ""));
                         String role = String.valueOf(sessionData.getOrDefault("role", ""));
 
-                        // 统一角色命名空间，旧公共业务路径不再对外暴露。
-                        if (!isRolePathAllowed(path, role)) {
-                            log.warn("角色路径越权，拦截请求: role={}, path={}", role, path);
-                            return writeForbiddenResponse(exchange, "当前角色无权访问该接口");
+                        // 从会话中解析权限集合
+                        List<String> permissions = Collections.emptyList();
+                        Object permObj = sessionData.get("permissions");
+                        if (permObj instanceof List) {
+                            @SuppressWarnings("unchecked")
+                            List<String> permList = (List<String>) permObj;
+                            permissions = permList;
+                        }
+
+                        // 统一权限命名空间校验（基于 permissions 动态判断）
+                        if (!isPathAllowed(path, permissions)) {
+                            log.warn("权限路径越权，拦截请求: permissions={}, path={}", permissions, path);
+                            return writeForbiddenResponse(exchange, "当前账号无权访问该接口");
                         }
 
                         // 构建新请求，注入用户信息到请求头
@@ -151,18 +161,51 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         return false;
     }
 
-    private boolean isRolePathAllowed(String path, String role) {
+    /**
+     * 基于权限码判断请求路径是否允许访问（动态，不再硬编码角色）
+     */
+    private boolean isPathAllowed(String path, List<String> permissions) {
         if (path.startsWith("/api/v1/employee/")) {
-            return "EMPLOYEE".equals(role) || "APPROVER".equals(role) || "ADMIN".equals(role);
+            // 员工命名空间：任何已认证用户均可访问
+            return true;
         }
         if (path.startsWith("/api/v1/approver/")) {
-            return "APPROVER".equals(role) || "ADMIN".equals(role);
+            // 审批命名空间：需要审批权限
+            return permissions.contains("workorder:approve");
         }
         if (path.startsWith("/api/v1/admin/")) {
-            return "ADMIN".equals(role);
+            // 管理命名空间：按路径精确匹配所需权限
+            return hasPermissionForAdminPath(path, permissions);
         }
         // 登录后只允许角色命名空间；头像读取由白名单提前放行。
         return !path.startsWith("/api/v1/");
+    }
+
+    /**
+     * 管理命名空间路径→权限码精确映射（最小权限原则）
+     */
+    private boolean hasPermissionForAdminPath(String path, List<String> permissions) {
+        String[][] pathPermMap = {
+                {"/api/v1/admin/users", "user:manage"},
+                {"/api/v1/admin/departments", "dept:manage"},
+                {"/api/v1/admin/roles", "role:manage"},
+                {"/api/v1/admin/workorders", "workorder:admin"},
+                {"/api/v1/admin/approvals", "workorder:approve"},
+                {"/api/v1/admin/approval-templates", "template:manage"},
+                {"/api/v1/admin/messages", "user:manage"},
+                {"/api/v1/admin/dead-letters", "deadletter:manage"},
+                {"/api/v1/admin/reminders", "deadletter:manage"},
+                {"/api/v1/admin/stats", "stats:view"},
+                {"/api/v1/admin/ai", "config:manage"},
+                {"/api/v1/admin/config", "config:manage"},
+        };
+        for (String[] mapping : pathPermMap) {
+            if (path.startsWith(mapping[0])) {
+                return permissions.contains(mapping[1]);
+            }
+        }
+        // 未匹配的管理路径默认拒绝（最小权限）
+        return false;
     }
 
     /**

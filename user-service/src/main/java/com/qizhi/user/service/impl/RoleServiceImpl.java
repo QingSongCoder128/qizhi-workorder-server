@@ -5,14 +5,19 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.qizhi.common.core.exception.BusinessException;
 import com.qizhi.common.core.result.PageResult;
 import com.qizhi.user.dto.RoleDTO;
+import com.qizhi.user.entity.SysPermission;
 import com.qizhi.user.entity.SysRole;
+import com.qizhi.user.entity.SysRolePermission;
 import com.qizhi.user.entity.SysUserRole;
+import com.qizhi.user.mapper.SysPermissionMapper;
 import com.qizhi.user.mapper.SysRoleMapper;
+import com.qizhi.user.mapper.SysRolePermissionMapper;
 import com.qizhi.user.mapper.SysUserRoleMapper;
 import com.qizhi.user.service.RoleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -33,6 +38,8 @@ public class RoleServiceImpl implements RoleService {
 
     private final SysRoleMapper roleMapper;
     private final SysUserRoleMapper userRoleMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
+    private final SysPermissionMapper permissionMapper;
 
     /** 内置角色编码，受保护不允许删除 */
     private static final Set<String> BUILT_IN_ROLES = Set.of("EMPLOYEE", "APPROVER", "ADMIN");
@@ -129,6 +136,41 @@ public class RoleServiceImpl implements RoleService {
         roleMapper.updateById(role);
 
         log.info("删除角色: id={}, code={}", id, role.getRoleCode());
+    }
+
+    @Override
+    public List<SysPermission> getAllPermissions() {
+        return permissionMapper.selectList(
+                new LambdaQueryWrapper<SysPermission>().orderByAsc(SysPermission::getSortOrder));
+    }
+
+    @Override
+    public List<String> getRolePermissionCodes(Long roleId) {
+        return rolePermissionMapper.selectList(
+                new LambdaQueryWrapper<SysRolePermission>().eq(SysRolePermission::getRoleId, roleId))
+                .stream().map(SysRolePermission::getPermissionCode).toList();
+    }
+
+    @Override
+    @Transactional
+    public void updateRolePermissions(Long roleId, List<String> permissionCodes) {
+        SysRole role = roleMapper.selectById(roleId);
+        if (role == null) {
+            throw new BusinessException("角色不存在");
+        }
+        // 先删除原有权限
+        rolePermissionMapper.delete(
+                new LambdaQueryWrapper<SysRolePermission>().eq(SysRolePermission::getRoleId, roleId));
+        // 再插入新权限
+        if (permissionCodes != null && !permissionCodes.isEmpty()) {
+            for (String code : permissionCodes) {
+                SysRolePermission rp = new SysRolePermission();
+                rp.setRoleId(roleId);
+                rp.setPermissionCode(code);
+                rolePermissionMapper.insert(rp);
+            }
+        }
+        log.info("更新角色权限: roleId={}, permissions={}", roleId, permissionCodes);
     }
 }
 

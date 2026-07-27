@@ -30,7 +30,13 @@ public class DeptController {
         List<SysDepartment> all = departmentMapper.selectList(
                 new LambdaQueryWrapper<SysDepartment>().eq(SysDepartment::getStatus, "ENABLED")
                         .orderByAsc(SysDepartment::getSortOrder));
-        List<Map<String, Object>> tree = buildTree(all, 0L);
+        // 统计每个部门的人数
+        List<SysUser> users = userMapper.selectList(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getStatus, "ENABLED"));
+        Map<String, Long> userCountMap = users.stream()
+                .filter(u -> u.getDeptCode() != null)
+                .collect(Collectors.groupingBy(SysUser::getDeptCode, Collectors.counting()));
+        List<Map<String, Object>> tree = buildTree(all, 0L, userCountMap);
         return R.ok(tree);
     }
 
@@ -68,7 +74,7 @@ public class DeptController {
     /**
      * 删除部门（软删除：状态设为 DISABLED）
      * SRS 需求: US-01 部门管理
-     * 禁用前检查：是否有关联的启用状态用户
+     * 禁用前检查：是否有子部门、是否有关联的启用状态用户
      */
     @Operation(summary = "删除部门")
     @DeleteMapping("/{id}")
@@ -77,13 +83,21 @@ public class DeptController {
         if (dept == null) {
             throw new BusinessException("部门不存在");
         }
+        // 检查是否有启用状态的子部门
+        Long childCount = departmentMapper.selectCount(
+                new LambdaQueryWrapper<SysDepartment>()
+                        .eq(SysDepartment::getParentId, id)
+                        .eq(SysDepartment::getStatus, "ENABLED"));
+        if (childCount > 0) {
+            throw new BusinessException("该部门下还有 " + childCount + " 个子部门，请先删除子部门");
+        }
         // 检查是否有关联用户
         Long userCount = userMapper.selectCount(
                 new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getDeptCode, dept.getDeptCode())
                         .eq(SysUser::getStatus, "ENABLED"));
         if (userCount > 0) {
-            throw new BusinessException("该部门下还有 " + userCount + " 个启用用户，请先转移");
+            throw new BusinessException("该部门下还有 " + userCount + " 个用户，请先转移用户");
         }
         // 软删除
         dept.setStatus("DISABLED");
@@ -91,7 +105,7 @@ public class DeptController {
         return R.ok();
     }
 
-    private List<Map<String, Object>> buildTree(List<SysDepartment> all, Long parentId) {
+    private List<Map<String, Object>> buildTree(List<SysDepartment> all, Long parentId, Map<String, Long> userCountMap) {
         return all.stream()
                 .filter(d -> parentId.equals(d.getParentId()))
                 .map(d -> {
@@ -101,7 +115,8 @@ public class DeptController {
                     node.put("deptName", d.getDeptName());
                     node.put("parentId", d.getParentId());
                     node.put("sortOrder", d.getSortOrder());
-                    List<Map<String, Object>> children = buildTree(all, d.getId());
+                    node.put("userCount", userCountMap.getOrDefault(d.getDeptCode(), 0L));
+                    List<Map<String, Object>> children = buildTree(all, d.getId(), userCountMap);
                     if (!children.isEmpty()) {
                         node.put("children", children);
                     }

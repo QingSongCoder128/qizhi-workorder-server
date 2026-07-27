@@ -3,6 +3,7 @@ package com.qizhi.user.controller;
 import com.qizhi.common.core.result.PageResult;
 import com.qizhi.common.core.result.R;
 import com.qizhi.user.dto.RoleDTO;
+import com.qizhi.user.entity.SysPermission;
 import com.qizhi.user.entity.SysRole;
 import com.qizhi.user.service.RoleService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -84,6 +85,34 @@ public class RoleController {
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         roleService.deleteRole(id);
+        return R.ok();
+    }
+
+    /**
+     * 查询全部权限列表（用于前端渲染权限勾选框）
+     */
+    @Operation(summary = "全部权限列表")
+    @GetMapping("/permissions")
+    public R<List<SysPermission>> allPermissions() {
+        return R.ok(roleService.getAllPermissions());
+    }
+
+    /**
+     * 查询某角色已分配的权限编码列表
+     */
+    @Operation(summary = "角色已分配权限")
+    @GetMapping("/{id}/permissions")
+    public R<List<String>> rolePermissions(@PathVariable Long id) {
+        return R.ok(roleService.getRolePermissionCodes(id));
+    }
+
+    /**
+     * 更新角色权限分配
+     */
+    @Operation(summary = "更新角色权限")
+    @PutMapping("/{id}/permissions")
+    public R<Void> updatePermissions(@PathVariable Long id, @RequestBody List<String> permissionCodes) {
+        roleService.updateRolePermissions(id, permissionCodes);
         return R.ok();
     }
 }

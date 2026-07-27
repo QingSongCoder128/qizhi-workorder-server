@@ -2,6 +2,7 @@ package com.qizhi.user.service;
 
 import com.qizhi.common.core.result.PageResult;
 import com.qizhi.user.dto.RoleDTO;
+import com.qizhi.user.entity.SysPermission;
 import com.qizhi.user.entity.SysRole;
 
 import java.util.List;
@@ -55,4 +56,19 @@ public interface RoleService {
      * @param id 角色 ID
      */
     void deleteRole(Long id);
+
+    /**
+     * 查询全部权限列表
+     */
+    List<SysPermission> getAllPermissions();
+
+    /**
+     * 查询某角色已分配的权限编码
+     */
+    List<String> getRolePermissionCodes(Long roleId);
+
+    /**
+     * 更新角色权限分配（先删后插）
+     */
+    void updateRolePermissions(Long roleId, List<String> permissionCodes);
 }
