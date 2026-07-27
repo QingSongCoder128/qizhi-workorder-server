@@ -38,6 +38,9 @@ public final class CommonConstants {
     /** 用户角色（网关注入） */
     public static final String HEADER_USER_ROLE = "X-User-Role";
 
+    /** 用户权限列表（网关注入，逗号分隔） */
+    public static final String HEADER_USER_PERMISSIONS = "X-User-Permissions";
+
     /** 内部调用方 */
     public static final String HEADER_INTERNAL_CALLER = "X-Internal-Caller";
 

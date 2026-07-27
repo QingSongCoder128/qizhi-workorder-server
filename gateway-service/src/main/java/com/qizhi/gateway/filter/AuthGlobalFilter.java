@@ -128,6 +128,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                                 .header("X-User-Id", userId)
                                 .header("X-Username", username)
                                 .header("X-User-Role", role)
+                                .header("X-User-Permissions", String.join(",", permissions))
                                 .build();
 
                         // 自动续期必须处于同一响应式链中，避免独立 subscribe 丢失错误和上下文。
