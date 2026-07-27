@@ -14,6 +14,8 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -44,11 +46,20 @@ public class RateLimitAdminSecurityWebFilter implements WebFilter {
         }
         return redisTemplate.opsForValue().get("session:" + sessionId)
                 .flatMap(value -> {
-                    if (value instanceof Map<?, ?> session
-                            && "ADMIN".equals(String.valueOf(session.get("role")))) {
-                        return chain.filter(exchange);
+                    if (value instanceof Map<?, ?> session) {
+                        // 基于权限码判断（动态，不再硬编码角色）
+                        List<String> permissions = Collections.emptyList();
+                        Object permObj = session.get("permissions");
+                        if (permObj instanceof List<?> permList) {
+                            @SuppressWarnings("unchecked")
+                            List<String> casted = (List<String>) permList;
+                            permissions = casted;
+                        }
+                        if (permissions.contains("config:manage")) {
+                            return chain.filter(exchange);
+                        }
                     }
-                    return deny(exchange, HttpStatus.FORBIDDEN, R.forbidden("仅系统管理员可访问"));
+                    return deny(exchange, HttpStatus.FORBIDDEN, R.forbidden("无权访问限流配置"));
                 })
                 .switchIfEmpty(Mono.defer(() ->
                         deny(exchange, HttpStatus.UNAUTHORIZED, R.unauthorized("会话已过期"))));
