@@ -164,6 +164,19 @@ public class WorkOrderController {
     }
 
     /**
+     * 工单重试（PENDING_AI 状态卡住时，提交人一键重新触发 AI + 审批链路）
+     */
+    @Operation(summary = "重试处理（待AI处理状态卡住时）")
+    @PostMapping("/{id}/retry")
+    public R<Void> retry(@PathVariable Long id,
+                         @RequestHeader("X-User-Id") Long userId,
+                         @RequestHeader("X-Username") String username,
+                         @RequestHeader("X-User-Role") String role) {
+        workOrderService.retryProcess(id, userId, username, role);
+        return R.ok();
+    }
+
+    /**
      * 更新工单状态（供 approve-service Feign 回调）
      */
     @Operation(summary = "更新工单状态（内部调用）")

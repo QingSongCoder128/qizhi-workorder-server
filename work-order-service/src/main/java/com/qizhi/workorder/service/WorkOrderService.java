@@ -44,6 +44,9 @@ public interface WorkOrderService {
     /** 撤销工单（仅待审批状态可撤销） */
     void revoke(Long id, Long userId);
 
+    /** 重试处理（仅 PENDING_AI 状态，提交人或管理员一键重新触发 AI + 审批链路） */
+    void retryProcess(Long id, Long userId, String username, String role);
+
     /** 更新工单状态（供 approve-service 回调） */
     void updateStatus(Long id, String status, String remark);
 

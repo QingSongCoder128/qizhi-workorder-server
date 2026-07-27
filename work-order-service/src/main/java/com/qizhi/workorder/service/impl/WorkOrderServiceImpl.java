@@ -527,6 +527,39 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     }
 
     @Override
+    public void retryProcess(Long id, Long userId, String username, String role) {
+        WorkOrder order = workOrderMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException("工单不存在");
+        }
+        if (!CommonConstants.STATUS_PENDING_AI.equals(order.getStatus())) {
+            throw new BusinessException("只有待AI处理状态的工单才能重试");
+        }
+        boolean isAdmin = "ADMIN".equals(role);
+        if (!isAdmin && !order.getSubmitterId().equals(userId)) {
+            throw new BusinessException("只能重试自己的工单");
+        }
+
+        log.info("工单重试开始: orderNo={}, userId={}", order.getOrderNo(), userId);
+
+        // 重新触发 AI 智能预处理（失败不阻断流程）
+        processAI(order);
+
+        // Seata 分布式事务：更新状态为待审批 + 创建审批单
+        completeApprovalStage(order, userId, username);
+
+        // 记录操作历史
+        saveHistory(id, CommonConstants.STATUS_PENDING_AI, CommonConstants.STATUS_PENDING_APPROVE,
+                userId, username, "用户手动重试，重新触发AI分析与审批链路");
+
+        // 发送通知 + 延迟督办
+        sendSubmitNotification(order, userId);
+        sendDelayRemind(order);
+        invalidateStatsCache();
+        log.info("工单重试完成: orderNo={}", order.getOrderNo());
+    }
+
+    @Override
     public WorkOrder getById(Long id) {
         return workOrderMapper.selectById(id);
     }
