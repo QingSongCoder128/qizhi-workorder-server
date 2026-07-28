@@ -373,9 +373,13 @@ public class UserServiceImpl implements UserService {
         if (userRoles.isEmpty()) {
             return "EMPLOYEE";
         }
-        Long roleId = userRoles.get(0).getRoleId();
-        SysRole role = roleMapper.selectById(roleId);
-        return role != null ? role.getRoleCode() : "EMPLOYEE";
+        // 按优先级返回最高角色: ADMIN > APPROVER > EMPLOYEE
+        List<Long> roleIds = userRoles.stream().map(SysUserRole::getRoleId).toList();
+        List<SysRole> roles = roleMapper.selectBatchIds(roleIds);
+        Set<String> codes = roles.stream().map(SysRole::getRoleCode).collect(Collectors.toSet());
+        if (codes.contains("ADMIN")) return "ADMIN";
+        if (codes.contains("APPROVER")) return "APPROVER";
+        return "EMPLOYEE";
     }
 
     /**

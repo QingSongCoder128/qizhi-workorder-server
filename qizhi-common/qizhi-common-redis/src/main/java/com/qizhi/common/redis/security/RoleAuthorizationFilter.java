@@ -96,6 +96,10 @@ public class RoleAuthorizationFilter extends OncePerRequestFilter {
                     || path.equals("/api/v1/user/password")
                     || path.startsWith("/api/v1/user/avatar/");
             if (self) return true;
+            // 按角色查询用户列表：审批转交/加签业务需要，审批人可访问
+            if (path.equals("/api/v1/user/by-role")) {
+                return perms.contains("user:manage") || perms.contains("workorder:approve");
+            }
             // 其他用户管理操作需要 user:manage
             return perms.contains("user:manage");
         }
